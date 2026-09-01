@@ -1,10 +1,11 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, GuildMember } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, GuildMember, PermissionFlagsBits } from 'discord.js';
 import { CONFIG } from '../config';
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('setup')
-        .setDescription('Kayıt sistemini kurar ve kayıt butonunu gönderir. (Sadece Yöneticiler)'),
+        .setDescription('Kayıt sistemini kurar ve kayıt butonunu gönderir. (Sadece Yöneticiler)')
+        .setDefaultMemberPermissions(0),
         
     async execute(interaction: ChatInputCommandInteraction) {
         const member = interaction.member as GuildMember;
