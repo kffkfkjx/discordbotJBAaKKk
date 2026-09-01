@@ -53,8 +53,48 @@ module.exports = {
 
         // --- 2. HANDLE BUTTON INTERACTIONS ---
         if (interaction.isButton() && interaction.customId === 'close_ticket') {
-            await interaction.reply({ content: '🔒 Ticket 5 saniye içinde kapatılacak...' });
-            setTimeout(() => { if (interaction.channel) interaction.channel.delete().catch(()=>null) }, 5000);
+            const isAdmin = (interaction.member as GuildMember).permissions.has(PermissionFlagsBits.Administrator);
+            if (!isAdmin) {
+                return interaction.reply({ content: 'Bu bileti sadece yöneticiler kapatabilir!', ephemeral: true });
+            }
+
+            await interaction.reply({ content: '🔒 Ticket kapatılıyor... Arşiv (log) hazırlanıyor.' });
+
+            try {
+                if (interaction.channel) {
+                    const messages = await interaction.channel.messages.fetch({ limit: 100 });
+                    const msgsArray = Array.from(messages.values()).reverse();
+                    
+                    let transcript = `--- TICKET LOG (${(interaction.channel as any).name}) ---\n\n`;
+                    msgsArray.forEach(m => {
+                        const date = new Date(m.createdTimestamp).toLocaleString('tr-TR');
+                        transcript += `[${date}] ${m.author.tag}: ${m.content}\n`;
+                    });
+
+                    const { AttachmentBuilder } = require('discord.js');
+                    const transcriptAttachment = new AttachmentBuilder(Buffer.from(transcript, 'utf-8'), { name: `${(interaction.channel as any).name}-log.txt` });
+
+                    const logChannel = interaction.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL);
+                    if (logChannel) {
+                        const logEmbed = new EmbedBuilder()
+                            .setTitle('🎫 Ticket Kapatıldı ve Arşivlendi')
+                            .setColor('#FF0000')
+                            .addFields(
+                                { name: 'Kapatan Yetkili', value: `<@${interaction.user.id}>`, inline: true },
+                                { name: 'Ticket Adı', value: `${(interaction.channel as any).name}`, inline: true }
+                            )
+                            .setTimestamp();
+                        await (logChannel as any).send({ embeds: [logEmbed], files: [transcriptAttachment] }).catch(()=>null);
+                    }
+                    
+                    setTimeout(() => {
+                        if (interaction.channel) interaction.channel.delete().catch(()=>null);
+                    }, 4000);
+                }
+            } catch (err) {
+                console.error('[ERROR] Ticket loglama hatası:', err);
+                if (interaction.channel) interaction.channel.delete().catch(()=>null);
+            }
             return;
         }
 
@@ -317,7 +357,7 @@ module.exports = {
             if (val === 'ticket_genel') cat = 'genel-sorular';
             else if (val === 'ticket_teknik') cat = 'teknik-destek';
             else if (val === 'ticket_satin') cat = 'satin-alim';
-            else if (val === 'ticket_denuvo') cat = 'denuvo-aktivasyon';
+            
 
             const name = cat + '-' + interaction.user.username.replace(/[^a-z0-9]/gi, '');
 
