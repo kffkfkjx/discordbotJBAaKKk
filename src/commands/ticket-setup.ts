@@ -8,8 +8,8 @@ module.exports = {
         
     async execute(interaction: ChatInputCommandInteraction) {
         const embed = new EmbedBuilder()
-            .setTitle('👋 Hoşgeldin!')
-            .setDescription('📥 Aşağıdaki butonlardan uygun kategoriyi seçerek bir destek talebi oluşturabilirsin!')
+            .setTitle('👋 NexoGame Destek Merkezine Hoş Geldin!')
+            .setDescription('📥 Aşağıdaki açılır menüden sana uygun olan kategoriyi seçerek anında destek talebi (ticket) oluşturabilirsin. Ekibimiz en kısa sürede seninle ilgilenecektir.')
             .setColor('#2F3136') // Dark theme color matches Discord
             .setImage('https://giffiles.alphacoders.com/154/15472.gif');
 
@@ -17,35 +17,29 @@ module.exports = {
             .addComponents(
                 new StringSelectMenuBuilder()
                     .setCustomId('ticket_select')
-                    .setPlaceholder('Bir kategori seçin...')
+                    .setPlaceholder('Bir destek kategorisi seçin...')
                     .addOptions([
                         {
-                            label: 'Genel Sorular',
-                            description: 'Genel sorularınız için bilet açın.',
+                            label: 'NexoGame Genel Destek',
+                            description: 'Aklınıza takılan tüm genel konular için bilet açabilirsiniz.',
                             emoji: '⚙️',
                             value: 'ticket_genel',
                         },
                         {
-                            label: 'Teknik Destek',
-                            description: 'Yaşadığınız teknik sorunlar için yardım alın.',
+                            label: 'NexoGame Teknik Servis',
+                            description: 'Oyun içi veya sistemsel teknik problemler için yardım alın.',
                             emoji: '🛠️',
                             value: 'ticket_teknik',
                         },
                         {
-                            label: 'Satın Alım',
-                            description: 'Ürün satın alımı ile ilgili işlemler.',
+                            label: 'NexoGame Satın Alım',
+                            description: 'Ürün alma, hesap veya bakiye gibi işlemler için ulaşın.',
                             emoji: '🛒',
                             value: 'ticket_satin',
                         },
                         {
-                            label: 'Denuvo Aktivasyon',
-                            description: 'Denuvo oyun aktivasyon işlemleri.',
-                            emoji: '🛡️',
-                            value: 'ticket_denuvo',
-                        },
-                        {
                             label: 'Seçimi Sıfırla',
-                            description: 'Yaptığınız seçimi temizler.',
+                            description: 'Farklı bir kategori seçmek için menüyü temizler.',
                             emoji: '🔄',
                             value: 'ticket_reset',
                         },
