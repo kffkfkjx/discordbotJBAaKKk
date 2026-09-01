@@ -6,7 +6,8 @@ export const CONFIG = {
     },
     CHANNELS: {
         TARGET_CHANNEL: '1469998209580404823', // Setup kanalının ID'si
-        LOG_CHANNEL: '1469781548638142746'     // Yeni Kayıt ve İşlem loglarının gideceği kanalın ID'si
+        LOG_CHANNEL: '1469781548638142746',    // Yeni Kayıt ve İşlem loglarının gideceği kanalın ID'si
+        TICKET_LOG_CHANNEL: '1469781526387360038' // Ticket loglarının (.txt) gideceği özel kanal
     },
     AUTOMOD: {
         PROTECTED_CHANNELS: [
