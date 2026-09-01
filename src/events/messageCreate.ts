@@ -33,8 +33,12 @@ module.exports = {
 
         // 3. Reklam/Link Kontrolü (Küfür yoksa reklama bak)
         if (!isViolation) {
+            // E-posta adreslerini mesajdan geçici olarak sil (davet olarak algılamasın)
+            const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
+            const contentWithoutEmails = content.replace(emailRegex, '');
+            
             for (const pattern of CONFIG.AUTOMOD.AD_PATTERNS) {
-                if (content.includes(pattern)) {
+                if (contentWithoutEmails.includes(pattern)) {
                     isViolation = true;
                     violationType = 'Reklam / İzinsiz Bağlantı';
                     break;
