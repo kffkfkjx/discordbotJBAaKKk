@@ -19,20 +19,16 @@ module.exports = {
             return interaction.reply({ content: 'Bu kullanıcı sunucuda bulunamadı.', ephemeral: true });
         }
 
-        try {
-            await member.kick(reason);
-            await interaction.reply({ 
-                content: `✅ ${user} kullanıcısı sunucudan başarıyla atıldı (Kick).\n📝 **Sebep:** ${reason}`,
-                ephemeral: true
-            });
-        } catch (error) {
+        // Kullanıcıyı at (await kullanmadan arka planda devam etsin ki timeout olmasın)
+        member.kick(reason).catch((error) => {
             console.error('[ERROR] /kick command member.kick:', error);
-            await interaction.reply({ 
-                content: 'Kullanıcıyı atarken hata oluştu! Botun rolü, atılacak kişinin rolünden daha düşük olabilir.',
-                ephemeral: true
-            });
-            return;
-        }
+        });
+
+        // Başarılı mesajını beklemeden gönder
+        await interaction.reply({ 
+            content: `✅ ${user} kullanıcısı sunucudan başarıyla atıldı (Kick).\n📝 **Sebep:** ${reason}`,
+            ephemeral: true
+        });
 
         // Log (Ayrı bir try-catch içinde, log atamasa bile asıl işlemi bozmasın)
         try {
