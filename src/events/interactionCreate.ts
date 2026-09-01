@@ -52,6 +52,12 @@ module.exports = {
         }
 
         // --- 2. HANDLE BUTTON INTERACTIONS ---
+        if (interaction.isButton() && interaction.customId === 'close_ticket') {
+            await interaction.reply({ content: '🔒 Ticket 5 saniye içinde kapatılacak...' });
+            setTimeout(() => { if (interaction.channel) interaction.channel.delete().catch(()=>null) }, 5000);
+            return;
+        }
+
         if (interaction.isButton()) {
             if (interaction.customId === 'register_button') {
                 try {
@@ -302,7 +308,55 @@ module.exports = {
             }
         }
 
-        // --- 3. HANDLE MODAL SUBMITS ---
+        
+        if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
+            const val = interaction.values[0];
+            if (val === 'ticket_reset') return interaction.reply({ content: 'Seçim sıfırlandı.', ephemeral: true });
+
+            let cat = 'destek';
+            if (val === 'ticket_genel') cat = 'genel-sorular';
+            else if (val === 'ticket_teknik') cat = 'teknik-destek';
+            else if (val === 'ticket_satin') cat = 'satin-alim';
+            else if (val === 'ticket_denuvo') cat = 'denuvo-aktivasyon';
+
+            const name = cat + '-' + interaction.user.username.replace(/[^a-z0-9]/gi, '');
+
+            try {
+                if (!interaction.guild || !interaction.channel || !('parentId' in interaction.channel)) {
+                    return interaction.reply({ content: 'Bu komut sadece sunucu içindeki metin kanallarında çalışır.', ephemeral: true });
+                }
+
+                const ch = await interaction.guild.channels.create({
+                    name,
+                    type: 0,
+                    parent: interaction.channel.parentId as string,
+                    permissionOverwrites: [
+                        { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+                        { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
+                    ]
+                });
+
+                if (ch) {
+                    const { ButtonBuilder, ButtonStyle, ActionRowBuilder: LocalActionRowBuilder } = require('discord.js');
+                    const closeBtn = new LocalActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('close_ticket').setLabel('Talebi Kapat').setEmoji('🔒').setStyle(ButtonStyle.Danger)
+                    );
+                    
+                    const emb = new EmbedBuilder()
+                        .setTitle('Destek Talebi')
+                        .setDescription('Merhaba <@' + interaction.user.id + '>, yetkililer en kısa sürede seninle ilgilenecektir.\n**Kategori:** ' + cat)
+                        .setColor('#2F3136');
+
+                    await ch.send({ content: '<@' + interaction.user.id + '>', embeds: [emb], components: [closeBtn] });
+                    return interaction.reply({ content: '✅ Destek talebiniz oluşturuldu: <#' + ch.id + '>', ephemeral: true });
+                }
+            } catch (e) {
+                console.error(e);
+                return interaction.reply({ content: 'Hata oluştu.', ephemeral: true });
+            }
+        }
+// --- 3. HANDLE MODAL SUBMITS ---
         if (interaction.isModalSubmit()) {
             if (interaction.customId === 'reject_modal') {
                 const reason = interaction.fields.getTextInputValue('reject_reason');
