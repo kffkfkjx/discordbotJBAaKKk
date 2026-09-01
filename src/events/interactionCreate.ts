@@ -74,7 +74,7 @@ module.exports = {
                     const { AttachmentBuilder } = require('discord.js');
                     const transcriptAttachment = new AttachmentBuilder(Buffer.from(transcript, 'utf-8'), { name: `${(interaction.channel as any).name}-log.txt` });
 
-                    const logChannel = interaction.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL);
+                    const logChannel = interaction.client.channels.cache.get(CONFIG.CHANNELS.TICKET_LOG_CHANNEL);
                     if (logChannel) {
                         const logEmbed = new EmbedBuilder()
                             .setTitle('🎫 Ticket Kapatıldı ve Arşivlendi')
