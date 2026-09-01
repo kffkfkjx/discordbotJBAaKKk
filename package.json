@@ -1,0 +1,23 @@
+{
+  "name": "nexo-bot",
+  "version": "1.0.0",
+  "description": "Modern Discord Bot",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "node node_modules/ts-node/dist/bin.js src/index.ts",
+    "deploy": "node node_modules/ts-node/dist/bin.js src/deploy-commands.ts",
+    "build": "node node_modules/typescript/bin/tsc"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "jimp": "^0.22.12"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.14.9",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
