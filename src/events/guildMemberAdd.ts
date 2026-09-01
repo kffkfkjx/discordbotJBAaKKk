@@ -3,6 +3,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 const Jimp = require('jimp');
 
+let cachedBackground: any = null;
+let cachedFontTitle: any = null;
+let cachedFontSub: any = null;
+
 module.exports = {
     name: Events.GuildMemberAdd,
     async execute(member: GuildMember, client: any) {
@@ -24,15 +28,24 @@ module.exports = {
         if (!channel) return;
 
         try {
-            // Load background
-            const bgUrl = 'https://cdn.photoroom.com/v2/image-cache?path=gs://background-7ef44.appspot.com/backgrounds_v3/black/47_-_black.jpg';
-            const background = await Jimp.read(bgUrl);
-            
-            // USE COVER INSTEAD OF RESIZE TO PREVENT STRETCHING
-            background.cover(1024, 450);
-            background.color([{ apply: 'darken', params: [25] }]); // Hafif karartma (okunabilirlik icin)
+            // Load and cache background globally to save Render CPU/Network time
+            if (!cachedBackground) {
+                const bgUrl = 'https://cdn.photoroom.com/v2/image-cache?path=gs://background-7ef44.appspot.com/backgrounds_v3/black/47_-_black.jpg';
+                cachedBackground = await Jimp.read(bgUrl);
+                cachedBackground.cover(1024, 450);
+                cachedBackground.color([{ apply: 'darken', params: [25] }]);
+            }
+            if (!cachedFontTitle) {
+                cachedFontTitle = await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE);
+            }
+            if (!cachedFontSub) {
+                cachedFontSub = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
+            }
 
-            // Draw Avatar
+            // MUST CLONE SO WE DONT OVERWRITE THE CACHE
+            const background = cachedBackground.clone();
+
+            // Sadece avatarı okuyoruz, bu sayede işlem süresi 5-10 saniyeden < 1 saniyeye düşer
             const avatarUrl = member.user.displayAvatarURL({ extension: 'png', size: 256 });
             const avatar = await Jimp.read(avatarUrl);
 
@@ -40,24 +53,19 @@ module.exports = {
             avatar.resize(avatarSize, avatarSize).circle();
 
             const avatarX = (background.bitmap.width / 2) - (avatarSize / 2);
-            const avatarY = 40; // Biraz daha yukari alindi
+            const avatarY = 40; 
 
             background.composite(avatar, avatarX, avatarY);
-
-            // Draw Texts
-            const fontTitle = await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE);
-            const fontSub = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
             
-            // Isim ve mesaj
             const welcomeText = 'SUNUCUYA HOS GELDIN';
             const userName = member.user.tag;
             
-            background.print(fontTitle, 0, 280, {
+            background.print(cachedFontTitle, 0, 280, {
                 text: welcomeText,
                 alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER
             }, background.bitmap.width);
 
-            background.print(fontSub, 0, 360, {
+            background.print(cachedFontSub, 0, 360, {
                 text: userName,
                 alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER
             }, background.bitmap.width);
