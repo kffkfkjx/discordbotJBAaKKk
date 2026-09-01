@@ -125,20 +125,22 @@ module.exports = {
                         });
                     }
 
-                    // Try adding the role
-                    await member.roles.add(CONFIG.ROLES.MEMBER);
-                    
-                    // Log to the specified channel
-                    const logChannel = interaction.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL) as any;
-                    if (logChannel) {
-                        await logChannel.send({
-                            content: `✅ ${interaction.user} başarıyla kayıt oldu ve **Üye** rolü verildi.`
-                        });
-                    }
-
-                    return interaction.reply({ 
-                        content: 'Başarıyla kayıt oldunuz.', 
+                    // Anında yanıt gönder (3 saniyelik timeout'u engeller)
+                    await interaction.reply({ 
+                        content: '✅ Başarıyla kayıt oldunuz.', 
                         ephemeral: true 
+                    });
+
+                    // Arka planda rolü ver ve logla (await yok)
+                    member.roles.add(CONFIG.ROLES.MEMBER).then(() => {
+                        const logChannel = interaction.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL) as any;
+                        if (logChannel) {
+                            logChannel.send({
+                                content: `✅ ${interaction.user} başarıyla kayıt oldu ve **Üye** rolü verildi.`
+                            }).catch(() => null);
+                        }
+                    }).catch(error => {
+                        console.error('[ERROR] Failed to add member role:', error);
                     });
 
                 } catch (error) {
