@@ -3,6 +3,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 const Jimp = require('jimp');
 
+let cachedBackground: any = null;
+let cachedFontTitle: any = null;
+let cachedFontSub: any = null;
+
 module.exports = {
     name: Events.GuildMemberRemove,
     async execute(member: GuildMember, client: any) {
@@ -24,13 +28,20 @@ module.exports = {
         if (!channel) return;
 
         try {
-            // Load background
-            const bgUrl = 'https://cdn.photoroom.com/v2/image-cache?path=gs://background-7ef44.appspot.com/backgrounds_v3/black/47_-_black.jpg';
-            const background = await Jimp.read(bgUrl);
-            
-            // USE COVER INSTEAD OF RESIZE TO PREVENT STRETCHING
-            background.cover(1024, 450);
-            background.color([{ apply: 'darken', params: [50] }]); // Çıkış için biraz daha karanlık
+            if (!cachedBackground) {
+                const bgUrl = 'https://cdn.photoroom.com/v2/image-cache?path=gs://background-7ef44.appspot.com/backgrounds_v3/black/47_-_black.jpg';
+                cachedBackground = await Jimp.read(bgUrl);
+                cachedBackground.cover(1024, 450);
+                cachedBackground.color([{ apply: 'darken', params: [50] }]); // Çıkış için biraz daha karanlık
+            }
+            if (!cachedFontTitle) {
+                cachedFontTitle = await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE);
+            }
+            if (!cachedFontSub) {
+                cachedFontSub = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
+            }
+
+            const background = cachedBackground.clone();
 
             // Draw Avatar
             const avatarUrl = member.user.displayAvatarURL({ extension: 'png', size: 256 });
@@ -48,18 +59,15 @@ module.exports = {
             background.composite(avatar, avatarX, avatarY);
 
             // Draw Texts
-            const fontTitle = await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE);
-            const fontSub = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
-            
             const leaveText = 'ARAMIZDAN AYRILDI';
             const userName = member.user.tag;
             
-            background.print(fontTitle, 0, 280, {
+            background.print(cachedFontTitle, 0, 280, {
                 text: leaveText,
                 alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER
             }, background.bitmap.width);
 
-            background.print(fontSub, 0, 360, {
+            background.print(cachedFontSub, 0, 360, {
                 text: userName,
                 alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER
             }, background.bitmap.width);
