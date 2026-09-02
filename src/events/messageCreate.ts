@@ -12,6 +12,44 @@ module.exports = {
             return;
         }
 
+        
+        // --- OTOMATİK BAN SİSTEMİ ---
+        const fsLib = require('fs');
+        const pathLib = require('path');
+        const dbPath = pathLib.join(__dirname, '..', 'db.json');
+        let autoBanChannel = '1544500653571702864';
+        if (fsLib.existsSync(dbPath)) {
+            try {
+                const db = JSON.parse(fsLib.readFileSync(dbPath, 'utf8'));
+                if (db.autoBanChannel) autoBanChannel = db.autoBanChannel;
+            } catch (e) {}
+        }
+
+        if (message.channel.id === autoBanChannel) {
+            try {
+                await message.delete().catch(() => null);
+                await message.member?.ban({ reason: 'Otomatik Ban Kanalına mesaj gönderdi.' });
+                
+                const logChannel = message.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL);
+                if (logChannel) {
+                    const logEmbed = new EmbedBuilder()
+                        .setTitle('🚫 Otomatik Ban (Yasaklı Kanal)')
+                        .setColor('#8B0000') // Koyu Kırmızı
+                        .addFields(
+                            { name: 'Banlanan Kullanıcı', value: `${message.author} (${message.author.id})`, inline: true },
+                            { name: 'Kanal', value: `<#${autoBanChannel}>`, inline: true },
+                            { name: 'Sebep', value: 'Yasaklı (otomatik ban) kanalına mesaj gönderdi.', inline: false },
+                            { name: 'Mesaj İçeriği', value: `\`\`\`\n${message.content.substring(0, 1000)}\n\`\`\``, inline: false }
+                        )
+                        .setTimestamp();
+                    (logChannel as any).send({ embeds: [logEmbed] }).catch(() => null);
+                }
+            } catch (err) {
+                console.error('[ERROR] Auto-ban system failed:', err);
+            }
+            return; // Banlandıktan sonra automod'un çalışmasına gerek yok
+        }
+
         // 1. "Özellikle bu kanallarda" denilen kuralı veya tüm sunucu kuralını işletelim.
         // İstenirse SADECE belirlenen kanallarda çalışması için alttaki satırın yorumunu kaldırabilirsiniz:
         // if (!CONFIG.AUTOMOD.PROTECTED_CHANNELS.includes(message.channel.id)) return;
