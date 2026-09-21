@@ -50,7 +50,17 @@ module.exports = {
             return; // Banlandıktan sonra automod'un çalışmasına gerek yok
         }
 
-        // 1. "Özellikle bu kanallarda" denilen kuralı veya tüm sunucu kuralını işletelim.
+        
+        // Ticket kanallarını es geç (Özel destek talebi odalarında küfür/reklam koruması kapatıldı)
+        const channelName = (message.channel as any).name || '';
+        if (channelName.startsWith('genel-sorular-') || 
+            channelName.startsWith('teknik-destek-') || 
+            channelName.startsWith('satin-alim-') || 
+            channelName.startsWith('destek-')) {
+            return;
+        }
+
+// 1. "Özellikle bu kanallarda" denilen kuralı veya tüm sunucu kuralını işletelim.
         // İstenirse SADECE belirlenen kanallarda çalışması için alttaki satırın yorumunu kaldırabilirsiniz:
         // if (!CONFIG.AUTOMOD.PROTECTED_CHANNELS.includes(message.channel.id)) return;
 
