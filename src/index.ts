@@ -49,8 +49,11 @@ function startDiscordBot() {
         const command = require(filePath);
         if ('data' in command && 'execute' in command) {
             client.commands.set(command.data.name, command);
+        } else {
+            console.warn(`[UYARI] ${file} geçerli bir data veya execute barındırmıyor!`);
         }
     }
+    console.log(`[BOT] Toplam ${client.commands.size} komut başarıyla yüklendi.`);
 
     // Load Events
     const eventsPath = path.join(__dirname, 'events');
@@ -81,8 +84,29 @@ function startDiscordBot() {
         console.log(`[INFO] Shard ${shardId} reconnecting...`);
     });
 
+    // Debug & rate limit monitoring
+    client.on('debug', (info) => {
+        if (!info.includes('Heartbeat') && !info.includes('latency')) {
+            console.log(`[DISCORD DEBUG] ${info}`);
+        }
+    });
+
+    client.on('error', (error) => {
+        console.error(`[DISCORD CLIENT ERROR]`, error);
+    });
+
+    client.rest.on('rateLimited', (rateLimitInfo) => {
+        console.warn(`[DISCORD RATE-LIMIT]`, rateLimitInfo);
+    });
+
+    // Clean token (strip potential quotes or "Bot " prefix from environment)
+    const rawToken = process.env.TOKEN ? process.env.TOKEN.trim().replace(/^["']|["']$/g, '').replace(/^Bot\s+/i, '') : '';
+
+    console.log(`[BOT] startDiscordBot() başlatıldı.`);
+    console.log(`[BOT] Token durumu: ${rawToken ? `MEVCUT (Uzunluk: ${rawToken.length})` : 'TANIMSIZ / BOŞ!'}`);
+
     // Validate token before login
-    if (!process.env.TOKEN || process.env.TOKEN.trim() === '') {
+    if (!rawToken) {
         console.error("================================================================");
         console.error("[FATAL ERROR] Discord TOKEN tanımlı değil!");
         console.error("Eğer Render kullanıyorsanız:");
@@ -96,11 +120,19 @@ function startDiscordBot() {
         return;
     }
 
-    // Login
-    client.login(process.env.TOKEN).then(() => {
+    // Login with timeout alert
+    console.log(`[BOT] Discord API'ye giriş yapılıyor (client.login)...`);
+    const loginTimeout = setTimeout(() => {
+        console.warn(`[UYARI] Discord'a 15 saniyedir bağlanılamadı!`);
+        console.warn(`[UYARI] Eğer burada takılı kalıyorsa Discord, Render'ın IP adresini geçici olarak engellemiş (Cloudflare 429) veya bağlantıyı bekletiyor olabilir.`);
+    }, 15000);
+
+    client.login(rawToken).then(() => {
+        clearTimeout(loginTimeout);
         reconnectAttempts = 0; // Reset on successful login
         console.log(`[INFO] Bot Discord API'ye başarıyla bağlandı!`);
     }).catch(error => {
+        clearTimeout(loginTimeout);
         console.error("[ERROR] Discord'a giriş yapılamadı!", error);
         if (error?.message?.includes('An invalid token was provided')) {
             console.error("[HATA] Girilen TOKEN geçersiz! Lütfen Discord Developer Portal'dan yeni bir token alıp Render Environment ayarlarına ekleyin.");
