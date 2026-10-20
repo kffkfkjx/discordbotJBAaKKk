@@ -370,21 +370,13 @@ export function startDashboard(startBotFn: () => void, stopBotFn: () => void) {
         res.json({ success: true, running: isBotRunning });
     });
 
-    // Health check endpoint for keep-alive pings and uptime monitors
+    // Health check endpoint for keep-alive pings
     app.get('/health', (_req, res) => {
-        const stats = _statsFn();
-        res.json({
-            status: 'ok',
-            uptime: process.uptime(),
-            botRunning: isBotRunning,
-            discordConnected: stats.online !== undefined ? stats.online : (stats.servers > 0 || stats.ping > 0),
-            ping: stats.ping,
-            servers: stats.servers
-        });
+        res.json({ status: 'ok', uptime: process.uptime(), botRunning: isBotRunning });
     });
 
-    const PORT = Number(process.env.PORT) || 3000;
-    app.listen(PORT, '0.0.0.0', () => {
-        console.log(`[DASHBOARD] Yönetim paneli http://0.0.0.0:${PORT} adresinde çalışıyor.`);
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => {
+        console.log(`[DASHBOARD] Yönetim paneli http://localhost:${PORT} adresinde çalışıyor.`);
     });
 }
