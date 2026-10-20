@@ -81,11 +81,34 @@ function startDiscordBot() {
         console.log(`[INFO] Shard ${shardId} reconnecting...`);
     });
 
+    // Validate token before login
+    if (!process.env.TOKEN || process.env.TOKEN.trim() === '') {
+        console.error("================================================================");
+        console.error("[FATAL ERROR] Discord TOKEN tanımlı değil!");
+        console.error("Eğer Render kullanıyorsanız:");
+        console.error("1. Render Dashboard'a gidin -> Servisinizi seçin.");
+        console.error("2. Sol menüden 'Environment' sekmesine tıklayın.");
+        console.error("3. 'Add Environment Variable' diyerek:");
+        console.error("   Key: TOKEN");
+        console.error("   Value: [Discord Bot Token'ınız]");
+        console.error("   yazıp kaydedin ve Deploy edin.");
+        console.error("================================================================");
+        return;
+    }
+
     // Login
     client.login(process.env.TOKEN).then(() => {
         reconnectAttempts = 0; // Reset on successful login
+        console.log(`[INFO] Bot Discord API'ye başarıyla bağlandı!`);
     }).catch(error => {
-        console.error("[ERROR] Failed to login.", error);
+        console.error("[ERROR] Discord'a giriş yapılamadı!", error);
+        if (error?.message?.includes('An invalid token was provided')) {
+            console.error("[HATA] Girilen TOKEN geçersiz! Lütfen Discord Developer Portal'dan yeni bir token alıp Render Environment ayarlarına ekleyin.");
+        } else if (error?.message?.includes('Privileged intent') || error?.message?.includes('disallowed intents')) {
+            console.error("[HATA] Privileged Gateway Intents (Presence, Server Members, Message Content) Discord Developer Portal'da açık değil!");
+        } else if (error?.status === 429 || error?.message?.includes('429')) {
+            console.error("[HATA] Cloudflare / Discord 429 Rate Limit! Render sunucusunun IP adresi Discord tarafından geçici olarak engellenmiş olabilir.");
+        }
         scheduleReconnect();
     });
 }
