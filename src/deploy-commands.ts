@@ -23,7 +23,9 @@ const rest = new REST({ version: '10' }).setToken(process.env.TOKEN as string);
 
 (async () => {
     try {
+        const commandNames = commands.map(c => c.name);
         console.log(`[INFO] Started refreshing ${commands.length} application (/) commands.`);
+        console.log(`[INFO] Komut listesi (${commands.length}): ${commandNames.join(', ')}`);
 
         const data = await rest.put(
             Routes.applicationGuildCommands(
