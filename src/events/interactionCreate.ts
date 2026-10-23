@@ -1,4 +1,4 @@
-import { Events, Interaction, Client, GuildMember, EmbedBuilder, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } from 'discord.js';
+import { Events, Interaction, Client, GuildMember, EmbedBuilder, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder , MessageFlags } from 'discord.js';
 import { CONFIG } from '../config';
 
 module.exports = {
@@ -43,9 +43,9 @@ module.exports = {
             } catch (error) {
                 console.error(`[ERROR] Executing command ${interaction.commandName}:`, error);
                 if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp({ content: 'Bu komutu çalıştırırken bir hata oluştu!', ephemeral: true });
+                    await interaction.followUp({ content: 'Bu komutu çalıştırırken bir hata oluştu!', flags: MessageFlags.Ephemeral });
                 } else {
-                    await interaction.reply({ content: 'Bu komutu çalıştırırken bir hata oluştu!', ephemeral: true });
+                    await interaction.reply({ content: 'Bu komutu çalıştırırken bir hata oluştu!', flags: MessageFlags.Ephemeral });
                 }
             }
             return;
@@ -55,7 +55,7 @@ module.exports = {
         if (interaction.isButton() && interaction.customId === 'close_ticket') {
             const isAdmin = (interaction.member as GuildMember).permissions.has(PermissionFlagsBits.Administrator);
             if (!isAdmin) {
-                return interaction.reply({ content: 'Bu bileti sadece yöneticiler kapatabilir!', ephemeral: true });
+                return interaction.reply({ content: 'Bu bileti sadece yöneticiler kapatabilir!', flags: MessageFlags.Ephemeral });
             }
 
             await interaction.reply({ content: '🔒 Ticket kapatılıyor... Arşiv (log) hazırlanıyor.' });
@@ -110,7 +110,7 @@ module.exports = {
                     if (diffDays < CONFIG.REQUIRED_ACCOUNT_AGE_DAYS) {
                         return interaction.reply({ 
                             content: 'Hesabınız 1 aylık (30 günlük) değil, kayıt işlemi reddedildi.', 
-                            ephemeral: true 
+                            flags: MessageFlags.Ephemeral 
                         });
                     }
 
@@ -121,14 +121,14 @@ module.exports = {
                     if (member.roles.cache.has(CONFIG.ROLES.MEMBER)) {
                         return interaction.reply({ 
                             content: 'Zaten kayıtlısınız.', 
-                            ephemeral: true 
+                            flags: MessageFlags.Ephemeral 
                         });
                     }
 
                     // Anında yanıt gönder (3 saniyelik timeout'u engeller)
                     await interaction.reply({ 
                         content: '✅ Başarıyla kayıt oldunuz.', 
-                        ephemeral: true 
+                        flags: MessageFlags.Ephemeral 
                     });
 
                     // Arka planda rolü ver ve logla (await yok)
@@ -150,13 +150,13 @@ module.exports = {
                     if (error instanceof Error && error.message.includes('Missing Permissions')) {
                         return interaction.reply({ 
                             content: 'Kayıt işlemi başarısız oldu: Botun rol verme yetkisi yok veya verilecek rol botun rolünden daha üst sırada.', 
-                            ephemeral: true 
+                            flags: MessageFlags.Ephemeral 
                         });
                     }
 
                     return interaction.reply({ 
                         content: 'Kayıt işlemi sırasında beklenmeyen bir hata oluştu.', 
-                        ephemeral: true 
+                        flags: MessageFlags.Ephemeral 
                     });
                 }
             }
@@ -165,7 +165,7 @@ module.exports = {
             if (interaction.customId === 'approve_request' || interaction.customId === 'reject_request') {
                 const isAdmin = (interaction.member as GuildMember).permissions.has(PermissionFlagsBits.Administrator);
                 if (!isAdmin) {
-                    return interaction.reply({ content: 'Bu işlemi sadece Yöneticiler gerçekleştirebilir.', ephemeral: true });
+                    return interaction.reply({ content: 'Bu işlemi sadece Yöneticiler gerçekleştirebilir.', flags: MessageFlags.Ephemeral });
                 }
 
                 const message = interaction.message;
@@ -176,7 +176,7 @@ module.exports = {
                     embed.addFields({ name: 'Durum', value: '✅ ONAYLANDI', inline: false });
                     embed.setFooter({ text: `Onaylayan: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() });
                     await message.edit({ embeds: [embed], components: [] });
-                    await interaction.reply({ content: '✅ İstek başarıyla onaylandı.', ephemeral: true });
+                    await interaction.reply({ content: '✅ İstek başarıyla onaylandı.', flags: MessageFlags.Ephemeral });
 
                     // Log onayı
                     const logChannel = interaction.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL) as any;
@@ -215,11 +215,11 @@ module.exports = {
                 const gwData = (interaction.client as any).giveaways.get(gwId);
                 
                 if (!gwData || gwData.cancelled) {
-                    return interaction.reply({ content: 'Bu çekiliş artık aktif değil veya sona ermiş!', ephemeral: true });
+                    return interaction.reply({ content: 'Bu çekiliş artık aktif değil veya sona ermiş!', flags: MessageFlags.Ephemeral });
                 }
 
                 if (gwData.participants.has(interaction.user.id)) {
-                    return interaction.reply({ content: 'Bu çekilişe zaten katıldınız! Sonuçları bekleyin.', ephemeral: true });
+                    return interaction.reply({ content: 'Bu çekilişe zaten katıldınız! Sonuçları bekleyin.', flags: MessageFlags.Ephemeral });
                 }
 
                 // Katılımcıyı ekle
@@ -236,20 +236,20 @@ module.exports = {
                     await message.edit({ embeds: [embed] });
                 }
                 
-                await interaction.reply({ content: '🎉 Çekilişe başarıyla katıldınız! Bol şans.', ephemeral: true });
+                await interaction.reply({ content: '🎉 Çekilişe başarıyla katıldınız! Bol şans.', flags: MessageFlags.Ephemeral });
             }
 
             if (interaction.customId.startsWith('gw_cancel_')) {
                 const isAdmin = (interaction.member as GuildMember).permissions.has(PermissionFlagsBits.Administrator) || (interaction.member as GuildMember).permissions.has(PermissionFlagsBits.ManageEvents);
                 if (!isAdmin) {
-                    return interaction.reply({ content: 'Çekilişi iptal etme yetkiniz yok (Sadece Yöneticiler).', ephemeral: true });
+                    return interaction.reply({ content: 'Çekilişi iptal etme yetkiniz yok (Sadece Yöneticiler).', flags: MessageFlags.Ephemeral });
                 }
 
                 const gwId = interaction.customId.replace('gw_cancel_', '');
                 const gwData = (interaction.client as any).giveaways.get(gwId);
                 
                 if (!gwData || gwData.cancelled) {
-                    return interaction.reply({ content: 'Bu çekiliş zaten iptal edilmiş veya sona ermiş.', ephemeral: true });
+                    return interaction.reply({ content: 'Bu çekiliş zaten iptal edilmiş veya sona ermiş.', flags: MessageFlags.Ephemeral });
                 }
 
                 gwData.cancelled = true;
@@ -264,7 +264,7 @@ module.exports = {
 
                 // Butonları kaldır
                 await message.edit({ embeds: [embed], components: [] });
-                await interaction.reply({ content: '✅ Çekiliş başarıyla iptal edildi.', ephemeral: true });
+                await interaction.reply({ content: '✅ Çekiliş başarıyla iptal edildi.', flags: MessageFlags.Ephemeral });
                 
                 // Log the cancellation
                 const logChannel = interaction.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL) as any;
@@ -288,11 +288,11 @@ module.exports = {
                 const gwData = (interaction.client as any).giveaways.get(gwId);
 
                 if (!gwData) {
-                    return interaction.reply({ content: 'Bu çekilişin verisi bulunamadı veya çoktan sonuçlanmış.', ephemeral: true });
+                    return interaction.reply({ content: 'Bu çekilişin verisi bulunamadı veya çoktan sonuçlanmış.', flags: MessageFlags.Ephemeral });
                 }
 
                 if (interaction.user.id !== gwData.hostId && !(interaction.member as GuildMember).permissions.has(PermissionFlagsBits.Administrator)) {
-                    return interaction.reply({ content: 'Sadece çekilişi başlatan kişi veya yöneticiler kazananı seçebilir.', ephemeral: true });
+                    return interaction.reply({ content: 'Sadece çekilişi başlatan kişi veya yöneticiler kazananı seçebilir.', flags: MessageFlags.Ephemeral });
                 }
 
                 const maxSelect = Math.min(gwData.winnerCount, gwData.participants.size);
@@ -305,7 +305,7 @@ module.exports = {
                     .setMaxValues(maxSelect);
 
                 const row = new ActionRowBuilder<any>().addComponents(selectMenu);
-                await interaction.reply({ content: `Lütfen kazanan kişiyi/kişileri seçin (${maxSelect} kişi seçebilirsiniz):`, components: [row], ephemeral: true });
+                await interaction.reply({ content: `Lütfen kazanan kişiyi/kişileri seçin (${maxSelect} kişi seçebilirsiniz):`, components: [row], flags: MessageFlags.Ephemeral });
             }
         } // <-- End of isButton
 
@@ -316,7 +316,7 @@ module.exports = {
                 const gwData = (interaction.client as any).giveaways.get(gwId);
 
                 if (!gwData) {
-                    return interaction.reply({ content: 'Çekiliş bulunamadı veya çoktan sonuçlandı.', ephemeral: true });
+                    return interaction.reply({ content: 'Çekiliş bulunamadı veya çoktan sonuçlandı.', flags: MessageFlags.Ephemeral });
                 }
 
                 const selectedUsers = interaction.users; // Collection of selected users
@@ -341,7 +341,7 @@ module.exports = {
                     await channel.send(`🎊 Tebrikler ${winnersText}! Yönetici tarafından **${gwData.prize}** ödülü için seçildiniz!`);
                 }
 
-                await interaction.reply({ content: '✅ Kazananlar başarıyla seçildi ve duyuruldu!', ephemeral: true });
+                await interaction.reply({ content: '✅ Kazananlar başarıyla seçildi ve duyuruldu!', flags: MessageFlags.Ephemeral });
                 
                 // İlk çıkan butonu içeren mesajı silebilirsek güzel olur ama ephemeral olduğu için gerek yok
                 
@@ -353,7 +353,7 @@ module.exports = {
         
         if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
             const val = interaction.values[0];
-            if (val === 'ticket_reset') return interaction.reply({ content: 'Seçim sıfırlandı.', ephemeral: true });
+            if (val === 'ticket_reset') return interaction.reply({ content: 'Seçim sıfırlandı.', flags: MessageFlags.Ephemeral });
 
             let cat = 'destek';
             if (val === 'ticket_genel') cat = 'genel-sorular';
@@ -365,7 +365,7 @@ module.exports = {
 
             try {
                 if (!interaction.guild || !interaction.channel || !('parentId' in interaction.channel)) {
-                    return interaction.reply({ content: 'Bu komut sadece sunucu içindeki metin kanallarında çalışır.', ephemeral: true });
+                    return interaction.reply({ content: 'Bu komut sadece sunucu içindeki metin kanallarında çalışır.', flags: MessageFlags.Ephemeral });
                 }
 
                 const ch = await interaction.guild.channels.create({
@@ -391,11 +391,11 @@ module.exports = {
                         .setColor('#2F3136');
 
                     await ch.send({ content: '<@' + interaction.user.id + '>', embeds: [emb], components: [closeBtn] });
-                    return interaction.reply({ content: '✅ Destek talebiniz oluşturuldu: <#' + ch.id + '>', ephemeral: true });
+                    return interaction.reply({ content: '✅ Destek talebiniz oluşturuldu: <#' + ch.id + '>', flags: MessageFlags.Ephemeral });
                 }
             } catch (e) {
                 console.error(e);
-                return interaction.reply({ content: 'Hata oluştu.', ephemeral: true });
+                return interaction.reply({ content: 'Hata oluştu.', flags: MessageFlags.Ephemeral });
             }
         }
 // --- 3. HANDLE MODAL SUBMITS ---
@@ -405,7 +405,7 @@ module.exports = {
                 
                 const message = interaction.message;
                 if (!message) {
-                    return interaction.reply({ content: 'Mesaj bulunamadı, işlem iptal edildi.', ephemeral: true });
+                    return interaction.reply({ content: 'Mesaj bulunamadı, işlem iptal edildi.', flags: MessageFlags.Ephemeral });
                 }
 
                 const embed = EmbedBuilder.from(message.embeds[0]);
@@ -417,7 +417,7 @@ module.exports = {
                 embed.setFooter({ text: `Reddeden: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() });
                 
                 await message.edit({ embeds: [embed], components: [] });
-                await interaction.reply({ content: '❌ İstek başarıyla reddedildi ve sebep yazıldı.', ephemeral: true });
+                await interaction.reply({ content: '❌ İstek başarıyla reddedildi ve sebep yazıldı.', flags: MessageFlags.Ephemeral });
 
                 // Log reddi
                 const logChannel = interaction.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL) as any;
