@@ -19,7 +19,17 @@ export function startDashboard(startBotFn: () => void, stopBotFn: () => void) {
     const sessions = new Set<string>();
     const PASSWORD = 'nexoBOT-S22MasO9099LnJoaNaluYUBw';
 
-    app.get('/', (req, res) => {
+    // Verelia Engine & Discord Uptime Botları için 7/24 Aktiflik Endpoint'leri
+    app.get('/', (_req, res) => {
+        res.status(200).send('Verelia Engine: Sistem 7/24 Aktif 🟢');
+    });
+
+    app.get('/uptime', (_req, res) => {
+        res.status(200).send('Verelia Engine: Sistem 7/24 Aktif 🟢');
+    });
+
+    // Web Yönetim Paneli
+    app.get(['/panel', '/dashboard'], (req, res) => {
         res.send(`
             <!DOCTYPE html>
             <html lang="tr" class="dark">
@@ -377,6 +387,7 @@ export function startDashboard(startBotFn: () => void, stopBotFn: () => void) {
 
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
-        console.log(`[DASHBOARD] Yönetim paneli http://localhost:${PORT} adresinde çalışıyor.`);
+        console.log(`Uptime aktif: ${PORT}`);
+        console.log(`[DASHBOARD] Yönetim paneli http://localhost:${PORT}/panel adresinde çalışıyor.`);
     });
 }
