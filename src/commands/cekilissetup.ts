@@ -10,7 +10,7 @@ module.exports = {
         .addIntegerOption(option => option.setName('kazanan_sayisi').setDescription('Kaç kişi kazanacak?').setRequired(true).setMinValue(1).setMaxValue(20))
         .addStringOption(option => 
             option.setName('secim_turu')
-                .setDescription('Kazananlar nasıl belirlensin?')
+                .setDescriptiaon('Kazananlar nasıl belirlensin?')
                 .addChoices(
                     { name: 'Rastgele (Otomatik)', value: 'random' },
                     { name: 'Ben Seçeceğim (Manuel)', value: 'manual' }
@@ -76,6 +76,7 @@ module.exports = {
 
         // Set timeout to end giveaway
         setTimeout(async () => {
+          try {
             const currentGw = (interaction.client as any).giveaways.get(giveawayId);
             if (!currentGw || currentGw.cancelled) return; // Already cancelled or deleted
 
@@ -89,7 +90,7 @@ module.exports = {
 
             if (currentGw.selectionType === 'manual') {
                 // Manuel seçim için orijinal mesajı güncelle
-                const waitEmbed = EmbedBuilder.from(giveawayMessage.embeds[0])
+                const waitEmbed = (giveawayMessage.embeds[0] ? EmbedBuilder.from(giveawayMessage.embeds[0]) : new EmbedBuilder())
                     .setTitle('⏳ ÇEKİLİŞ SONA ERDİ (SEÇİM BEKLENİYOR) ⏳')
                     .setColor('#FFA500') // Turuncu (Bekleme)
                     .setDescription(`**Ödül:** ${currentGw.prize}\n\n*Yönetici şu an kazananları manuel olarak seçiyor...*`)
@@ -141,7 +142,7 @@ module.exports = {
 
             const winnersText = winners.length > 0 ? winners.map(w => `<@${w}>`).join(', ') : 'Kimse katılmadı!';
 
-            const endEmbed = EmbedBuilder.from(giveawayMessage.embeds[0])
+            const endEmbed = (giveawayMessage.embeds[0] ? EmbedBuilder.from(giveawayMessage.embeds[0]) : new EmbedBuilder())
                 .setTitle('🎉 ÇEKİLİŞ SONA ERDİ! 🎉')
                 .setColor('#333333') // Koyu renk
                 .setDescription(`**Ödül:** ${currentGw.prize}\n\n**Kazananlar:** ${winnersText}\n**Şartlar:** ${condition}`)
@@ -163,7 +164,9 @@ module.exports = {
 
             // Cleanup
             (interaction.client as any).giveaways.delete(giveawayId);
-
+          } catch (error) {
+            console.error(`[GIVEAWAY] ${giveawayId} sonlandırılırken hata:`, error);
+          }
         }, durationMins * 60 * 1000);
     }
 };
