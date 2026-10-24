@@ -78,6 +78,10 @@ module.exports = {
             await channel.send({ content: messageContent, files: [attachment] });
         } catch (error) {
             console.error('[GIRISCikis] Resim olusturulurken hata:', error);
+            // Resim oluşturulamadıysa karşılama yine de yazılı olarak gitsin
+            await channel.send({
+                content: `🌟 **Aramıza Hoş Geldin!** 🌟\n\nHoş geldin ${member.user}! Şu an tam **${member.guild.memberCount}** kişiyiz! 🥳`
+            }).catch(() => null);
         }
     },
 };
