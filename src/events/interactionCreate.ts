@@ -1,9 +1,20 @@
 import { Events, Interaction, Client, GuildMember, EmbedBuilder, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder , MessageFlags } from 'discord.js';
 import { CONFIG } from '../config';
+import { safeReply, truncate } from '../utils';
 
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction: Interaction, client: Client) {
+        try {
+            await handleInteraction(interaction, client);
+        } catch (error) {
+            console.error('[ERROR] Etkileşim işlenirken hata:', error);
+            await safeReply(interaction, '❌ İşlem sırasında beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.');
+        }
+    },
+};
+
+async function handleInteraction(interaction: Interaction, client: Client) {
         
         // --- 1. HANDLE SLASH COMMANDS ---
         if (interaction.isChatInputCommand()) {
@@ -18,7 +29,7 @@ module.exports = {
                 const logChannel = interaction.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL) as any;
                 if (logChannel) {
                     const args = interaction.options.data.map(opt => `**${opt.name}**: ${opt.value}`).join(' | ');
-                    const argsString = args.length > 0 ? args : 'Parametre yok (Boş)';
+                    const argsString = args.length > 0 ? truncate(args, 1000) : 'Parametre yok (Boş)';
 
                     const logEmbed = new EmbedBuilder()
                         .setTitle('💻 Komut Kullanıldı')
@@ -42,18 +53,14 @@ module.exports = {
                 await command.execute(interaction);
             } catch (error) {
                 console.error(`[ERROR] Executing command ${interaction.commandName}:`, error);
-                if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp({ content: 'Bu komutu çalıştırırken bir hata oluştu!', flags: MessageFlags.Ephemeral });
-                } else {
-                    await interaction.reply({ content: 'Bu komutu çalıştırırken bir hata oluştu!', flags: MessageFlags.Ephemeral });
-                }
+                await safeReply(interaction, 'Bu komutu çalıştırırken bir hata oluştu!');
             }
             return;
         }
 
         // --- 2. HANDLE BUTTON INTERACTIONS ---
         if (interaction.isButton() && interaction.customId === 'close_ticket') {
-            const isAdmin = (interaction.member as GuildMember).permissions.has(PermissionFlagsBits.Administrator);
+            const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
             if (!isAdmin) {
                 return interaction.reply({ content: 'Bu bileti sadece yöneticiler kapatabilir!', flags: MessageFlags.Ephemeral });
             }
@@ -68,7 +75,7 @@ module.exports = {
                     let transcript = `--- TICKET LOG (${(interaction.channel as any).name}) ---\n\n`;
                     msgsArray.forEach(m => {
                         const date = new Date(m.createdTimestamp).toLocaleString('tr-TR');
-                        transcript += `[${date}] ${m.author.tag}: ${m.content}\n`;
+                        transcript += `[${date}] ${m.author?.tag ?? 'Bilinmeyen Kullanıcı'}: ${m.content}\n`;
                     });
 
                     const { AttachmentBuilder } = require('discord.js');
@@ -148,27 +155,24 @@ module.exports = {
                     
                     // Specific error handling for permission issues
                     if (error instanceof Error && error.message.includes('Missing Permissions')) {
-                        return interaction.reply({ 
-                            content: 'Kayıt işlemi başarısız oldu: Botun rol verme yetkisi yok veya verilecek rol botun rolünden daha üst sırada.', 
-                            flags: MessageFlags.Ephemeral 
-                        });
+                        return safeReply(interaction, 'Kayıt işlemi başarısız oldu: Botun rol verme yetkisi yok veya verilecek rol botun rolünden daha üst sırada.');
                     }
 
-                    return interaction.reply({ 
-                        content: 'Kayıt işlemi sırasında beklenmeyen bir hata oluştu.', 
-                        flags: MessageFlags.Ephemeral 
-                    });
+                    return safeReply(interaction, 'Kayıt işlemi sırasında beklenmeyen bir hata oluştu.');
                 }
             }
 
             // Oyun İstek Sistemi Butonları
             if (interaction.customId === 'approve_request' || interaction.customId === 'reject_request') {
-                const isAdmin = (interaction.member as GuildMember).permissions.has(PermissionFlagsBits.Administrator);
+                const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
                 if (!isAdmin) {
                     return interaction.reply({ content: 'Bu işlemi sadece Yöneticiler gerçekleştirebilir.', flags: MessageFlags.Ephemeral });
                 }
 
                 const message = interaction.message;
+                if (!message.embeds[0]) {
+                    return interaction.reply({ content: 'İstek mesajı bozulmuş veya embed bulunamadı.', flags: MessageFlags.Ephemeral });
+                }
                 const embed = EmbedBuilder.from(message.embeds[0]);
 
                 if (interaction.customId === 'approve_request') {
@@ -227,20 +231,20 @@ module.exports = {
                 
                 // Embed altındaki katılımcı sayısını güncelle
                 const message = interaction.message;
-                const embed = EmbedBuilder.from(message.embeds[0]);
                 
                 // Footer text formatı: "X Dakika Sürecek | Katılımcı: 0"
-                if (embed.data.footer && embed.data.footer.text) {
-                    const newFooter = embed.data.footer.text.replace(/Katılımcı: \d+/, `Katılımcı: ${gwData.participants.size}`);
+                if (message.embeds[0]?.footer?.text) {
+                    const embed = EmbedBuilder.from(message.embeds[0]);
+                    const newFooter = message.embeds[0].footer.text.replace(/Katılımcı: \d+/, `Katılımcı: ${gwData.participants.size}`);
                     embed.setFooter({ text: newFooter });
-                    await message.edit({ embeds: [embed] });
+                    await message.edit({ embeds: [embed] }).catch(() => null);
                 }
                 
                 await interaction.reply({ content: '🎉 Çekilişe başarıyla katıldınız! Bol şans.', flags: MessageFlags.Ephemeral });
             }
 
             if (interaction.customId.startsWith('gw_cancel_')) {
-                const isAdmin = (interaction.member as GuildMember).permissions.has(PermissionFlagsBits.Administrator) || (interaction.member as GuildMember).permissions.has(PermissionFlagsBits.ManageEvents);
+                const isAdmin = (interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) || interaction.memberPermissions?.has(PermissionFlagsBits.ManageEvents)) ?? false;
                 if (!isAdmin) {
                     return interaction.reply({ content: 'Çekilişi iptal etme yetkiniz yok (Sadece Yöneticiler).', flags: MessageFlags.Ephemeral });
                 }
@@ -255,7 +259,7 @@ module.exports = {
                 gwData.cancelled = true;
 
                 const message = interaction.message;
-                const embed = EmbedBuilder.from(message.embeds[0])
+                const embed = (message.embeds[0] ? EmbedBuilder.from(message.embeds[0]) : new EmbedBuilder())
                     .setTitle('🛑 ÇEKİLİŞ İPTAL EDİLDİ 🛑')
                     .setColor('#FF0000')
                     .setDescription(`**Ödül:** ${gwData.prize}\n\n*Bu çekiliş bir yetkili tarafından iptal edilmiştir.*`)
@@ -291,11 +295,14 @@ module.exports = {
                     return interaction.reply({ content: 'Bu çekilişin verisi bulunamadı veya çoktan sonuçlanmış.', flags: MessageFlags.Ephemeral });
                 }
 
-                if (interaction.user.id !== gwData.hostId && !(interaction.member as GuildMember).permissions.has(PermissionFlagsBits.Administrator)) {
+                if (interaction.user.id !== gwData.hostId && !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
                     return interaction.reply({ content: 'Sadece çekilişi başlatan kişi veya yöneticiler kazananı seçebilir.', flags: MessageFlags.Ephemeral });
                 }
 
                 const maxSelect = Math.min(gwData.winnerCount, gwData.participants.size);
+                if (maxSelect < 1) {
+                    return interaction.reply({ content: 'Bu çekilişe kimse katılmadığı için kazanan seçilemez.', flags: MessageFlags.Ephemeral });
+                }
 
                 const { UserSelectMenuBuilder } = require('discord.js');
                 const selectMenu = new UserSelectMenuBuilder()
@@ -327,7 +334,7 @@ module.exports = {
                 if (channel) {
                     const giveawayMessage = await channel.messages.fetch(gwData.messageId).catch(() => null);
                     if (giveawayMessage) {
-                        const endEmbed = EmbedBuilder.from(giveawayMessage.embeds[0])
+                        const endEmbed = (giveawayMessage.embeds[0] ? EmbedBuilder.from(giveawayMessage.embeds[0]) : new EmbedBuilder())
                             .setTitle('🎉 ÇEKİLİŞ SONA ERDİ (MANUEL)! 🎉')
                             .setColor('#333333')
                             .setDescription(`**Ödül:** ${gwData.prize}\n\n**Kazananlar:** ${winnersText}\n*Bu kazananlar yönetici tarafından özel olarak seçilmiştir.*`)
@@ -368,6 +375,9 @@ module.exports = {
                     return interaction.reply({ content: 'Bu komut sadece sunucu içindeki metin kanallarında çalışır.', flags: MessageFlags.Ephemeral });
                 }
 
+                // Kanal oluşturma 3 saniyeyi aşabilir; etkileşim zaman aşımına düşmesin diye önce erteliyoruz
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
                 const ch = await interaction.guild.channels.create({
                     name,
                     type: 0,
@@ -391,11 +401,17 @@ module.exports = {
                         .setColor('#2F3136');
 
                     await ch.send({ content: '<@' + interaction.user.id + '>', embeds: [emb], components: [closeBtn] });
-                    return interaction.reply({ content: '✅ Destek talebiniz oluşturuldu: <#' + ch.id + '>', flags: MessageFlags.Ephemeral });
+                    await interaction.editReply({ content: '✅ Destek talebiniz oluşturuldu: <#' + ch.id + '>' });
+                    return;
                 }
             } catch (e) {
-                console.error(e);
-                return interaction.reply({ content: 'Hata oluştu.', flags: MessageFlags.Ephemeral });
+                console.error('[ERROR] Ticket oluşturma hatası:', e);
+                if (interaction.deferred) {
+                    await interaction.editReply({ content: '❌ Destek talebi oluşturulamadı. Botun kanal oluşturma yetkisini kontrol edin.' }).catch(() => null);
+                } else {
+                    await safeReply(interaction, '❌ Destek talebi oluşturulamadı.');
+                }
+                return;
             }
         }
 // --- 3. HANDLE MODAL SUBMITS ---
@@ -408,11 +424,14 @@ module.exports = {
                     return interaction.reply({ content: 'Mesaj bulunamadı, işlem iptal edildi.', flags: MessageFlags.Ephemeral });
                 }
 
+                if (!message.embeds[0]) {
+                    return interaction.reply({ content: 'İstek mesajının içeriği bulunamadı.', flags: MessageFlags.Ephemeral });
+                }
                 const embed = EmbedBuilder.from(message.embeds[0]);
                 embed.setColor('#FF0000'); // Red
                 embed.addFields(
                     { name: 'Durum', value: '❌ REDDEDİLDİ', inline: false },
-                    { name: 'Reddetme Sebebi', value: `> ${reason}`, inline: false }
+                    { name: 'Reddetme Sebebi', value: `> ${truncate(reason, 1000)}`, inline: false }
                 );
                 embed.setFooter({ text: `Reddeden: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() });
                 
@@ -432,5 +451,4 @@ module.exports = {
             }
         }
 
-    },
-};
+}
