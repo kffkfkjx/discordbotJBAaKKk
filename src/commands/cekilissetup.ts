@@ -10,7 +10,7 @@ module.exports = {
         .addIntegerOption(option => option.setName('kazanan_sayisi').setDescription('Kaç kişi kazanacak?').setRequired(true).setMinValue(1).setMaxValue(20))
         .addStringOption(option => 
             option.setName('secim_turu')
-                .setDescriptiaon('Kazananlar nasıl belirlensin?')
+                .setDescription('Kazananlar nasıl belirlensin?')
                 .addChoices(
                     { name: 'Rastgele (Otomatik)', value: 'random' },
                     { name: 'Ben Seçeceğim (Manuel)', value: 'manual' }
