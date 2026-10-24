@@ -56,14 +56,30 @@ function startDiscordBot() {
     const eventsPath = path.join(__dirname, 'events');
     const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.ts') || file.endsWith('.js'));
 
+    const botClient = client;
     for (const file of eventFiles) {
         const filePath = path.join(eventsPath, file);
         delete require.cache[require.resolve(filePath)]; // Clear cache
         const event = require(filePath);
+        if (!event?.name || typeof event.execute !== 'function') {
+            console.warn(`[WARN] Geçersiz event dosyası atlandı: ${file}`);
+            continue;
+        }
+
+        // Her event'i güvenli sarmalayıcıya al: bir event'te oluşan hata
+        // (senkron veya async) botu etkilemez, sadece loglanır.
+        const safeHandler = async (...args: any[]) => {
+            try {
+                await event.execute(...args, botClient);
+            } catch (error) {
+                console.error(`[EVENT ERROR] ${event.name} (${file}):`, error);
+            }
+        };
+
         if (event.once) {
-            client.once(event.name, (...args) => event.execute(...args, client));
+            client.once(event.name, safeHandler);
         } else {
-            client.on(event.name, (...args) => event.execute(...args, client));
+            client.on(event.name, safeHandler);
         }
     }
 
