@@ -80,6 +80,10 @@ module.exports = {
             await channel.send({ content: messageContent, files: [attachment] });
         } catch (error) {
             console.error('[GIRISCikis] Cikis resmi olusturulurken hata:', error);
+            // Resim oluşturulamadıysa çıkış bildirimi yine de yazılı olarak gitsin
+            await channel.send({
+                content: `🌑 **${member.user?.tag ?? 'Bir üye'}** aramızdan ayrıldı. **${member.guild.memberCount}** kişi kaldık.`
+            }).catch(() => null);
         }
     },
 };
