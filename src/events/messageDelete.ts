@@ -1,28 +1,44 @@
-import { Events, Message, EmbedBuilder } from 'discord.js';
+import { Events, Message, PartialMessage, EmbedBuilder, Client } from 'discord.js';
 import { CONFIG } from '../config';
+import { codeBlock, getSendableChannel } from '../utils';
 
 module.exports = {
     name: Events.MessageDelete,
-    async execute(message: Message, client: any) {
-        if (message.author?.bot || !message.guild) return;
+    async execute(message: Message | PartialMessage, client: Client) {
+        // DM mesajlarını ve bot mesajlarını yoksay
+        if (!message.guild) return;
+        if (message.author?.bot) return;
 
-        const logChannel = client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL) as any;
+        const logChannel = getSendableChannel(client, CONFIG.CHANNELS.LOG_CHANNEL);
         if (!logChannel) return;
+
+        // Mesaj önbellekte yoksa (bot yeniden başladıktan önce atılmış mesajlar) Discord
+        // sadece ID gönderir; author ve content null olur. Bu yüzden her alan güvenli okunur.
+        const author = message.author ?? null;
 
         const embed = new EmbedBuilder()
             .setTitle('🗑️ Mesaj Silindi')
             .setColor('#FF5555')
-            .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL() })
-            .addFields(
-                { name: 'Kanal', value: `${message.channel}`, inline: true },
-                { name: 'Kullanıcı', value: `${message.author} (\`${message.author.id}\`)`, inline: true },
-                { name: 'Silinen İçerik', value: message.content ? `\`\`\`\n${message.content.substring(0, 1000)}\n\`\`\`` : '*İçerik yok veya okunamadı*', inline: false }
-            )
             .setTimestamp();
 
-        if (message.attachments.size > 0) {
-            embed.addFields({ name: 'Eklentiler', value: `${message.attachments.size} adet dosya/resim vardı.`, inline: false });
+        if (author) {
+            embed.setAuthor({ name: author.tag, iconURL: author.displayAvatarURL() });
+        } else {
+            embed.setAuthor({ name: 'Bilinmeyen Kullanıcı' });
         }
+
+        embed.addFields(
+            { name: 'Kanal', value: `<#${message.channelId}>`, inline: true },
+            { name: 'Kullanıcı', value: author ? `${author} (\`${author.id}\`)` : '*Bilinmiyor (mesaj önbellekte değildi)*', inline: true },
+            { name: 'Silinen İçerik', value: codeBlock(message.content), inline: false }
+        );
+
+        const attachmentCount = message.attachments?.size ?? 0;
+        if (attachmentCount > 0) {
+            embed.addFields({ name: 'Eklentiler', value: `${attachmentCount} adet dosya/resim vardı.`, inline: false });
+        }
+
+        embed.setFooter({ text: `Mesaj ID: ${message.id}` });
 
         await logChannel.send({ embeds: [embed] }).catch(() => null);
     }
