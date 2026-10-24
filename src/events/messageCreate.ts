@@ -1,5 +1,41 @@
 import { Events, Message, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
+import * as fs from 'fs';
+import * as path from 'path';
 import { CONFIG } from '../config';
+import { codeBlock, getSendableChannel } from '../utils';
+
+const DEFAULT_AUTOBAN_CHANNEL = '1544500653571702864';
+const DB_PATH = path.join(__dirname, '..', 'db.json');
+const DB_CACHE_MS = 5000;
+
+let cachedAutoBanChannel = DEFAULT_AUTOBAN_CHANNEL;
+let lastDbRead = 0;
+
+/** db.json'u her mesajda okumak yerine 5 saniyelik önbellekle okur. */
+function getAutoBanChannel(): string {
+    const now = Date.now();
+    if (now - lastDbRead < DB_CACHE_MS) return cachedAutoBanChannel;
+    lastDbRead = now;
+    try {
+        if (fs.existsSync(DB_PATH)) {
+            const db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+            cachedAutoBanChannel = db.autoBanChannel || DEFAULT_AUTOBAN_CHANNEL;
+        }
+    } catch {
+        // Bozuk JSON - son bilinen değeri kullan
+    }
+    return cachedAutoBanChannel;
+}
+
+function escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// JS'teki \b Türkçe karakterleri (ç, ş, ğ, ö, ü, ı) harf saymaz; bu yüzden "oç", "göt" gibi
+// kelimeler yakalanmıyordu. Unicode harf sınırı kullanan regex'ler bir kez derlenir.
+const SWEAR_REGEXES = CONFIG.AUTOMOD.SWEAR_WORDS.map(
+    word => new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(word.toLocaleLowerCase('tr-TR'))}(?![\\p{L}\\p{N}])`, 'iu')
+);
 
 module.exports = {
     name: Events.MessageCreate,
@@ -14,23 +50,14 @@ module.exports = {
 
         
         // --- OTOMATİK BAN SİSTEMİ ---
-        const fsLib = require('fs');
-        const pathLib = require('path');
-        const dbPath = pathLib.join(__dirname, '..', 'db.json');
-        let autoBanChannel = '1544500653571702864';
-        if (fsLib.existsSync(dbPath)) {
-            try {
-                const db = JSON.parse(fsLib.readFileSync(dbPath, 'utf8'));
-                if (db.autoBanChannel) autoBanChannel = db.autoBanChannel;
-            } catch (e) {}
-        }
+        const autoBanChannel = getAutoBanChannel();
 
         if (message.channel.id === autoBanChannel) {
             try {
                 await message.delete().catch(() => null);
                 await message.member?.ban({ reason: 'Otomatik Ban Kanalına mesaj gönderdi.' });
                 
-                const logChannel = message.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL);
+                const logChannel = getSendableChannel(message.client, CONFIG.CHANNELS.LOG_CHANNEL);
                 if (logChannel) {
                     const logEmbed = new EmbedBuilder()
                         .setTitle('🚫 Otomatik Ban (Yasaklı Kanal)')
@@ -39,10 +66,10 @@ module.exports = {
                             { name: 'Banlanan Kullanıcı', value: `${message.author} (${message.author.id})`, inline: true },
                             { name: 'Kanal', value: `<#${autoBanChannel}>`, inline: true },
                             { name: 'Sebep', value: 'Yasaklı (otomatik ban) kanalına mesaj gönderdi.', inline: false },
-                            { name: 'Mesaj İçeriği', value: `\`\`\`\n${message.content.substring(0, 1000)}\n\`\`\``, inline: false }
+                            { name: 'Mesaj İçeriği', value: codeBlock(message.content), inline: false }
                         )
                         .setTimestamp();
-                    (logChannel as any).send({ embeds: [logEmbed] }).catch(() => null);
+                    logChannel.send({ embeds: [logEmbed] }).catch(() => null);
                 }
             } catch (err) {
                 console.error('[ERROR] Auto-ban system failed:', err);
@@ -64,14 +91,14 @@ module.exports = {
         // İstenirse SADECE belirlenen kanallarda çalışması için alttaki satırın yorumunu kaldırabilirsiniz:
         // if (!CONFIG.AUTOMOD.PROTECTED_CHANNELS.includes(message.channel.id)) return;
 
-        const content = message.content.toLowerCase();
+        // Türkçe büyük "İ" toLowerCase ile "i̇" (noktalı birleşik) olur; önce düz "i"ye çevrilir
+        const content = message.content.replace(/İ/g, 'i').toLowerCase();
         let isViolation = false;
         let violationType = '';
 
         // 2. Küfür Kontrolü
-        for (const word of CONFIG.AUTOMOD.SWEAR_WORDS) {
+        for (const regex of SWEAR_REGEXES) {
             // Kelimenin tam eşleşmesini bul (Örn: "amk" -> "amk", ama "pamuk" geçsin)
-            const regex = new RegExp(`\\b${word}\\b`, 'i');
             if (regex.test(content)) {
                 isViolation = true;
                 violationType = 'Küfür / Kötü Söz';
@@ -110,7 +137,7 @@ module.exports = {
                 setTimeout(() => warningMsg.delete().catch(() => null), 5000);
 
                 // Log kanalına detaylı rapor yolla
-                const logChannel = message.client.channels.cache.get(CONFIG.CHANNELS.LOG_CHANNEL) as any;
+                const logChannel = getSendableChannel(message.client, CONFIG.CHANNELS.LOG_CHANNEL);
                 if (logChannel) {
                     const logEmbed = new EmbedBuilder()
                         .setTitle('🚨 Otomatik Moderasyon (Auto-Mod)')
@@ -120,11 +147,11 @@ module.exports = {
                             { name: 'Kullanıcı', value: `${message.author} (${message.author.id})`, inline: true },
                             { name: 'Kanal', value: `${message.channel}`, inline: true },
                             { name: 'İhlal Türü', value: violationType, inline: false },
-                            { name: 'Silinen Mesaj İçeriği', value: `\`\`\`\n${message.content.substring(0, 1000)}\n\`\`\``, inline: false }
+                            { name: 'Silinen Mesaj İçeriği', value: codeBlock(message.content), inline: false }
                         )
                         .setTimestamp();
 
-                    await logChannel.send({ embeds: [logEmbed] });
+                    await logChannel.send({ embeds: [logEmbed] }).catch(() => null);
                 }
 
             } catch (error) {
