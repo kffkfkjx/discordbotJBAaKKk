@@ -58,24 +58,46 @@ export async function safeReply(interaction: Interaction, content: string): Prom
     }
 }
 
+// Global lock to prevent race conditions when closing tickets
+export const ticketClosingLocks = new Set<string>();
+
 /**
- * Kullanıcı sunucuda yetkili mi? (Yönetici izni, Kanalları Yönet, Kurucu veya Ortak Kurucu rolü)
+ * Kullanıcı sunucuda yetkili mi? (Yönetici izni, Kanalları Yönet, Kurucu, Ortak Kurucu veya Yetkili rolü)
  */
 export function isStaffMember(member: any): boolean {
     if (!member) return false;
     
-    // Discord Administrator veya ManageChannels yetkisi
-    if (member.permissions?.has?.(PermissionFlagsBits.Administrator) || 
-        member.permissions?.has?.(PermissionFlagsBits.ManageChannels)) {
-        return true;
+    // 1. PermissionsBitField veya raw permissions kontrolü
+    try {
+        if (typeof member.permissions?.has === 'function') {
+            if (member.permissions.has(PermissionFlagsBits.Administrator) || 
+                member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+                return true;
+            }
+        } else if (member.permissions) {
+            const perms = BigInt(member.permissions);
+            const adminBit = BigInt(PermissionFlagsBits.Administrator);
+            const manageChannelsBit = BigInt(PermissionFlagsBits.ManageChannels);
+            if ((perms & adminBit) === adminBit || (perms & manageChannelsBit) === manageChannelsBit) {
+                return true;
+            }
+        }
+    } catch {}
+
+    // 2. Rol kontrolleri: FOUNDER, CO_FOUNDER veya YETKILI
+    const staffRoleIds = [CONFIG.ROLES.FOUNDER, CONFIG.ROLES.CO_FOUNDER, CONFIG.ROLES.YETKILI].filter(Boolean);
+
+    // GuildMember (roles.cache)
+    if (member.roles?.cache) {
+        for (const roleId of staffRoleIds) {
+            if (member.roles.cache.has(roleId)) return true;
+        }
     }
 
-    // Rol kontrolleri: FOUNDER, CO_FOUNDER veya YETKILI
-    if (member.roles?.cache) {
-        if (member.roles.cache.has(CONFIG.ROLES.FOUNDER) || 
-            member.roles.cache.has(CONFIG.ROLES.CO_FOUNDER) ||
-            member.roles.cache.has(CONFIG.ROLES.YETKILI)) {
-            return true;
+    // APIGuildMember (roles: string[])
+    if (Array.isArray(member.roles)) {
+        for (const roleId of staffRoleIds) {
+            if (member.roles.includes(roleId)) return true;
         }
     }
 
@@ -85,23 +107,30 @@ export function isStaffMember(member: any): boolean {
 /**
  * Kullanıcı bu ticket'ı kapatmaya yetkili mi? (Yetkili veya bileti açan kişi)
  */
-export function canCloseTicket(channel: any, user: User, member: any): boolean {
-    // 1. Yönetici veya yetkili ise kapatabilir
+export function canCloseTicket(channel: any, user: User | any, member: any): boolean {
+    if (!channel || !user) return false;
+
+    // 1. Yönetici veya yetkili ise her zaman kapatabilir
     if (isStaffMember(member)) return true;
 
     // 2. Ticket konusu içinde kullanıcının ID'si kayıtlı mı?
-    if (channel.topic && channel.topic.includes(user.id)) return true;
-
-    // 3. Kanal izinlerinde bu kullanıcıya özel izin verilmiş mi?
-    if (channel.permissionOverwrites?.cache?.has(user.id)) {
-        const overwrite = channel.permissionOverwrites.cache.get(user.id);
-        if (overwrite?.allow?.has(PermissionFlagsBits.ViewChannel)) return true;
+    if (channel.topic && typeof channel.topic === 'string' && channel.topic.includes(user.id)) {
+        return true;
     }
 
-    // 4. Kanal adında kullanıcının adı geçiyor mu?
-    const sanitizedUsername = user.username.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    // 3. Kanal izinlerinde bu kullanıcıya özel izin verilmiş mi?
+    try {
+        if (channel.permissionOverwrites?.cache?.has(user.id)) {
+            const overwrite = channel.permissionOverwrites.cache.get(user.id);
+            if (overwrite?.allow?.has(PermissionFlagsBits.ViewChannel)) return true;
+        }
+    } catch {}
+
+    // 4. Kanal adında kullanıcının adı veya ID'si geçiyor mu?
+    const sanitizedUsername = (user.username || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
     const chName = (channel.name || '').toLowerCase();
     if (sanitizedUsername && chName.endsWith(sanitizedUsername)) return true;
+    if (user.id && chName.endsWith(user.id)) return true;
 
     return false;
 }
@@ -110,6 +139,7 @@ export function canCloseTicket(channel: any, user: User, member: any): boolean {
  * Bir kanalın ticket kanalı olup olmadığını kontrol eder.
  */
 export function isTicketChannel(channel: any): boolean {
+    if (!channel) return false;
     const chName = (channel?.name || '').toLowerCase();
     if (chName.startsWith('genel-sorular-') || 
         chName.startsWith('teknik-destek-') || 
@@ -118,7 +148,7 @@ export function isTicketChannel(channel: any): boolean {
         chName.startsWith('ticket-')) {
         return true;
     }
-    if (channel?.topic && channel.topic.includes('ticket-owner:')) {
+    if (channel?.topic && typeof channel.topic === 'string' && channel.topic.includes('ticket-owner:')) {
         return true;
     }
     return false;
@@ -134,103 +164,135 @@ export async function handleCloseTicket(interaction: any): Promise<void> {
         return;
     }
 
-    if (!isTicketChannel(channel)) {
-        await safeReply(interaction, '❌ Bu işlem sadece destek talebi (ticket) kanallarında kullanılabilir!');
+    const channelId = channel.id;
+
+    // Kilit kontrolü: Zaten kapanmakta olan bir kanala mükerrer işlem yapılmasını engelle
+    if (ticketClosingLocks.has(channelId)) {
+        await safeReply(interaction, '⏳ Bu ticket zaten kapatılıyor, lütfen bekleyin...');
         return;
     }
+    ticketClosingLocks.add(channelId);
 
-    const member = interaction.member;
-    const user = interaction.user;
-
-    // Yetki kontrolü (Yetkili VEYA bileti açan kişi kapatabilir)
-    if (!canCloseTicket(channel, user, member)) {
-        await safeReply(interaction, '❌ Bu bileti sadece **bileti açan kişi** veya **yöneticiler** kapatabilir!');
-        return;
-    }
-
-    // Yanıt ver
-    if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: '🔒 Ticket kapatılıyor... Arşiv (log) hazırlanıyor.' });
-    } else {
-        await interaction.followUp({ content: '🔒 Ticket kapatılıyor... Arşiv (log) hazırlanıyor.' });
-    }
-
-    // 1. Kanal mesajlarını çek
-    let msgsArray: any[] = [];
     try {
-        const messages = await channel.messages.fetch({ limit: 100 });
-        msgsArray = Array.from(messages.values()).reverse();
-    } catch (fetchErr) {
-        console.error('[TICKET] Mesaj geçmişi alınamadı:', fetchErr);
-    }
-
-    // 2. Transkript oluştur
-    let transcript = `========================================================\n`;
-    transcript += `               NEXOGAMEST TICKET ARŞİVİ\n`;
-    transcript += `========================================================\n`;
-    transcript += `Kanal Adı     : #${channel.name}\n`;
-    transcript += `Kapatan Kişi  : ${user.tag} (${user.id})\n`;
-    transcript += `Kapanış Tarihi: ${new Date().toLocaleString('tr-TR')}\n`;
-    transcript += `Toplam Mesaj  : ${msgsArray.length}\n`;
-    transcript += `========================================================\n\n`;
-
-    for (const m of msgsArray) {
-        const date = new Date(m.createdTimestamp).toLocaleString('tr-TR');
-        const author = m.author ? `${m.author.tag} (${m.author.id})` : 'Bilinmeyen Kullanıcı';
-        const text = m.content ? m.content : '(Metin içeriği yok)';
-        transcript += `[${date}] ${author}:\n${text}\n`;
-        if (m.attachments && m.attachments.size > 0) {
-            const atts = Array.from(m.attachments.values()).map((a: any) => a.url).join(' , ');
-            transcript += `[Ekler]: ${atts}\n`;
+        if (!isTicketChannel(channel)) {
+            ticketClosingLocks.delete(channelId);
+            await safeReply(interaction, '❌ Bu işlem sadece destek talebi (ticket) kanallarında kullanılabilir!');
+            return;
         }
-        transcript += `\n`;
-    }
 
-    // 3. Arşiv kanalına gönder
-    try {
-        const transcriptAttachment = new AttachmentBuilder(Buffer.from(transcript, 'utf-8'), { 
-            name: `${channel.name}-arsiv.txt` 
-        });
+        const member = interaction.member;
+        const user = interaction.user;
 
-        // Ticket arşivleri SADECE ve SADECE TICKET_LOG_CHANNEL (1469781526387360038) kanalına gider
-        const logChannel = await fetchSendableChannel(interaction.client, CONFIG.CHANNELS.TICKET_LOG_CHANNEL);
+        // Yetki kontrolü (Yetkili VEYA bileti açan kişi kapatabilir)
+        if (!canCloseTicket(channel, user, member)) {
+            ticketClosingLocks.delete(channelId);
+            await safeReply(interaction, '❌ Bu bileti sadece **bileti açan kişi** veya **yöneticiler** kapatabilir!');
+            return;
+        }
 
-        if (logChannel) {
-            const logEmbed = new EmbedBuilder()
-                .setTitle('🎫 Destek Talebi Kapatıldı & Arşivlendi')
-                .setColor('#E74C3C')
-                .addFields(
-                    { name: 'Kanal', value: `\`${channel.name}\``, inline: true },
-                    { name: 'Kapatan', value: `<@${user.id}> (\`${user.id}\`)`, inline: true },
-                    { name: 'Mesaj Sayısı', value: `${msgsArray.length} adet mesaj`, inline: true }
-                )
-                .setTimestamp();
-
-            await logChannel.send({ embeds: [logEmbed], files: [transcriptAttachment] }).catch((e: any) => {
-                console.error('[TICKET LOG] Arşiv kanalına dosya gönderilemedi:', e);
-            });
-            console.log(`[TICKET] ${channel.name} başarıyla arşivlendi.`);
+        // 1. Bildirim ver
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: '🔒 **Ticket kapatılıyor...** Kanal kilitlendi ve arşiv hazırlanıyor.' }).catch(() => null);
         } else {
-            console.warn('[TICKET LOG] Arşiv kanalı bulunamadı! ID:', CONFIG.CHANNELS.TICKET_LOG_CHANNEL);
+            await interaction.followUp({ content: '🔒 **Ticket kapatılıyor...** Kanal kilitlendi ve arşiv hazırlanıyor.' }).catch(() => null);
         }
-    } catch (archiveErr) {
-        console.error('[TICKET] Arşivleme işlemi sırasında hata:', archiveErr);
-    }
 
-    // 4. Geri sayım ve kanalı silme
-    try {
-        await channel.send({ content: '🗑️ Ticket arşivlendi! Kanal **3 saniye** içinde kalıcı olarak siliniyor...' }).catch(() => null);
-    } catch {}
-
-    setTimeout(async () => {
+        // 2. Butonları hemen kaldır (Başka kimsenin basamaması için)
         try {
-            // En güncel kanal referansını al ve sil
-            const ch = await interaction.guild?.channels.fetch(channel.id).catch(() => null);
-            if (ch) {
-                await ch.delete(`Ticket kapatıldı: ${user.tag}`);
+            if (interaction.isButton && interaction.isButton() && interaction.message) {
+                await interaction.message.edit({ components: [] }).catch(() => null);
+            }
+        } catch {}
+
+        // 3. Kanalı kilitle: Normal üyelerin mesaj yazmasını engelle
+        try {
+            if (interaction.guild && channel.permissionOverwrites) {
+                await channel.permissionOverwrites.edit(interaction.guild.id, {
+                    SendMessages: false,
+                    ViewChannel: false
+                }).catch(() => null);
+            }
+        } catch {}
+
+        // 4. Kanal mesajlarını çek (Transkript için)
+        let msgsArray: any[] = [];
+        try {
+            const messages = await channel.messages.fetch({ limit: 100 });
+            msgsArray = Array.from(messages.values()).reverse();
+        } catch (fetchErr) {
+            console.error('[TICKET] Mesaj geçmişi alınamadı:', fetchErr);
+        }
+
+        // 5. Transkript oluştur
+        let transcript = `========================================================\n`;
+        transcript += `               NEXOGAME TICKET ARŞİVİ\n`;
+        transcript += `========================================================\n`;
+        transcript += `Kanal Adı     : #${channel.name}\n`;
+        transcript += `Kapatan Kişi  : ${user.tag} (${user.id})\n`;
+        transcript += `Kapanış Tarihi: ${new Date().toLocaleString('tr-TR')}\n`;
+        transcript += `Toplam Mesaj  : ${msgsArray.length}\n`;
+        transcript += `========================================================\n\n`;
+
+        for (const m of msgsArray) {
+            const date = new Date(m.createdTimestamp).toLocaleString('tr-TR');
+            const author = m.author ? `${m.author.tag} (${m.author.id})` : 'Bilinmeyen Kullanıcı';
+            const text = m.content ? m.content : '(Metin içeriği yok)';
+            transcript += `[${date}] ${author}:\n${text}\n`;
+            if (m.attachments && m.attachments.size > 0) {
+                const atts = Array.from(m.attachments.values()).map((a: any) => a.url).join(' , ');
+                transcript += `[Ekler]: ${atts}\n`;
+            }
+            transcript += `\n`;
+        }
+
+        // 6. Arşiv kanalına gönder
+        try {
+            const transcriptAttachment = new AttachmentBuilder(Buffer.from(transcript, 'utf-8'), { 
+                name: `${channel.name}-arsiv.txt` 
+            });
+
+            // Ticket arşivleri SADECE TICKET_LOG_CHANNEL (1469781526387360038) kanalına gider
+            const logChannel = await fetchSendableChannel(interaction.client, CONFIG.CHANNELS.TICKET_LOG_CHANNEL);
+
+            if (logChannel) {
+                const logEmbed = new EmbedBuilder()
+                    .setTitle('🎫 Destek Talebi Kapatıldı & Arşivlendi')
+                    .setColor('#E74C3C')
+                    .addFields(
+                        { name: 'Kanal', value: `\`#${channel.name}\``, inline: true },
+                        { name: 'Kapatan', value: `<@${user.id}> (\`${user.id}\`)`, inline: true },
+                        { name: 'Mesaj Sayısı', value: `${msgsArray.length} adet mesaj`, inline: true }
+                    )
+                    .setTimestamp();
+
+                await logChannel.send({ embeds: [logEmbed], files: [transcriptAttachment] }).catch((e: any) => {
+                    console.error('[TICKET LOG] Arşiv kanalına dosya gönderilemedi:', e);
+                });
+                console.log(`[TICKET] #${channel.name} başarıyla arşivlendi.`);
+            } else {
+                console.warn('[TICKET LOG] Arşiv kanalı bulunamadı! ID:', CONFIG.CHANNELS.TICKET_LOG_CHANNEL);
+            }
+        } catch (archiveErr) {
+            console.error('[TICKET] Arşivleme işlemi sırasında hata:', archiveErr);
+        }
+
+        // 7. Geri sayım bildirimi
+        try {
+            await channel.send({ content: '🗑️ Ticket arşivlendi! Kanal **3 saniye** içinde kalıcı olarak siliniyor...' }).catch(() => null);
+        } catch {}
+
+        // 3 saniye bekle
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // 8. Kanalı sil
+        try {
+            let chToDelete = channel;
+            if (interaction.guild) {
+                chToDelete = await interaction.guild.channels.fetch(channelId).catch(() => channel);
+            }
+            if (chToDelete && typeof chToDelete.delete === 'function') {
+                await chToDelete.delete(`Ticket kapatıldı: ${user.tag} (${user.id})`);
                 console.log(`[TICKET] Kanal silindi: #${channel.name}`);
-            } else if (typeof channel.delete === 'function') {
-                await channel.delete(`Ticket kapatıldı: ${user.tag}`);
             }
         } catch (delErr: any) {
             console.error('[ERROR] Ticket kanalı silinemedi:', delErr);
@@ -238,5 +300,7 @@ export async function handleCloseTicket(interaction: any): Promise<void> {
                 content: `⚠️ **Kanal Silinemedi!** Botun sunucuda "Kanalları Yönet" (Manage Channels) yetkisi olduğundan emin olun.\nHata: \`${delErr?.message || delErr}\``
             }).catch(() => null);
         }
-    }, 3000);
+    } finally {
+        ticketClosingLocks.delete(channelId);
+    }
 }
