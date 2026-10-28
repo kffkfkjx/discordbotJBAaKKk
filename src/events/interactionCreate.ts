@@ -1,8 +1,12 @@
 import { Events, Interaction, Client, GuildMember, EmbedBuilder, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder , MessageFlags } from 'discord.js';
 import { CONFIG } from '../config';
+
+// Locks to prevent race conditions for ticket creation and closing
+const ticketCreationLocks = new Set<string>();
+const ticketClosingLocks = new Set<string>();
 import { safeReply, truncate, handleCloseTicket } from '../utils';
 
-const ticketCreationLocks = new Set<string>();
+
 
 module.exports = {
     name: Events.InteractionCreate,
@@ -62,7 +66,19 @@ async function handleInteraction(interaction: Interaction, client: Client) {
 
         // --- 2. HANDLE BUTTON INTERACTIONS ---
         if (interaction.isButton() && interaction.customId === 'close_ticket') {
-            await handleCloseTicket(interaction);
+            const channelId = (interaction.channel && 'id' in interaction.channel) ? interaction.channel.id : '';
+            if (ticketClosingLocks.has(channelId)) {
+                return interaction.reply({
+                    content: '⏳ Ticket zaten kapanıyor, lütfen bekleyin...',
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+            ticketClosingLocks.add(channelId);
+            try {
+                await handleCloseTicket(interaction);
+            } finally {
+                ticketClosingLocks.delete(channelId);
+            }
             return;
         }
 
