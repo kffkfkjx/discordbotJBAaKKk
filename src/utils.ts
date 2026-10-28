@@ -70,10 +70,11 @@ export function isStaffMember(member: any): boolean {
         return true;
     }
 
-    // Rol kontrolleri: FOUNDER veya CO_FOUNDER
+    // Rol kontrolleri: FOUNDER, CO_FOUNDER veya YETKILI
     if (member.roles?.cache) {
         if (member.roles.cache.has(CONFIG.ROLES.FOUNDER) || 
-            member.roles.cache.has(CONFIG.ROLES.CO_FOUNDER)) {
+            member.roles.cache.has(CONFIG.ROLES.CO_FOUNDER) ||
+            member.roles.cache.has(CONFIG.ROLES.YETKILI)) {
             return true;
         }
     }
@@ -191,11 +192,8 @@ export async function handleCloseTicket(interaction: any): Promise<void> {
             name: `${channel.name}-arsiv.txt` 
         });
 
-        // TICKET_LOG_CHANNEL öncelikli, yoksa LOG_CHANNEL (fetch ile garanti edilir)
-        let logChannel = await fetchSendableChannel(interaction.client, CONFIG.CHANNELS.TICKET_LOG_CHANNEL);
-        if (!logChannel) {
-            logChannel = await fetchSendableChannel(interaction.client, CONFIG.CHANNELS.LOG_CHANNEL);
-        }
+        // Ticket arşivleri SADECE ve SADECE TICKET_LOG_CHANNEL (1469781526387360038) kanalına gider
+        const logChannel = await fetchSendableChannel(interaction.client, CONFIG.CHANNELS.TICKET_LOG_CHANNEL);
 
         if (logChannel) {
             const logEmbed = new EmbedBuilder()
