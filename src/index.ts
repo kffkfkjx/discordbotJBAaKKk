@@ -83,10 +83,9 @@ function startDiscordBot() {
         }
     }
 
-    // Auto-reconnect on disconnect
+    // Shard events (Discord.js shardı otomatik olarak yeniden bağlar)
     client.on('shardDisconnect', (event) => {
         console.warn(`[WARN] Shard disconnected. Code: ${event.code}. Reason: ${event.reason}`);
-        scheduleReconnect();
     });
 
     client.on('shardError', (error) => {
@@ -113,7 +112,9 @@ function scheduleReconnect() {
     }
 
     if (client) {
-        client.destroy();
+        try {
+            client.destroy();
+        } catch {}
         client = null;
     }
 
@@ -128,7 +129,9 @@ function scheduleReconnect() {
 
 function stopDiscordBot() {
     if (client) {
-        client.destroy();
+        try {
+            client.destroy();
+        } catch {}
         client = null;
         reconnectAttempts = 0;
         console.log("[INFO] Bot kapatıldı (Dashboard üzerinden).");
@@ -154,10 +157,6 @@ process.on('unhandledRejection', (reason, promise) => {
 process.on('uncaughtException', (error) => {
     console.error('[FATAL] Uncaught Exception:', error);
     console.error('[FATAL] Bot ayakta tutuluyor...');
-    // If the client is dead, try to reconnect
-    if (!client || !client.isReady()) {
-        scheduleReconnect();
-    }
 });
 
 process.on('SIGTERM', () => {
