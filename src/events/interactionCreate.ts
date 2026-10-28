@@ -2,8 +2,9 @@ import { Events, Interaction, Client, GuildMember, EmbedBuilder, PermissionFlags
 import { CONFIG } from '../config';
 import { safeReply, truncate, handleCloseTicket } from '../utils';
 
-// Locks to prevent race conditions for ticket creation
+// Locks and cooldowns to prevent race conditions for ticket creation
 const ticketCreationLocks = new Set<string>();
+const userTicketCooldown = new Map<string, number>();
 
 
 
@@ -325,37 +326,45 @@ async function handleInteraction(interaction: Interaction, client: Client) {
         if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
             const val = interaction.values[0];
             if (val === 'ticket_reset') {
-                return interaction.reply({ content: '🔄 Seçim sıfırlandı.', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: '🔄 Seçim sıfırlandı.', flags: MessageFlags.Ephemeral }).catch(() => null);
             }
 
             const userId = interaction.user.id;
+            const now = Date.now();
+            const lastAttempt = userTicketCooldown.get(userId) || 0;
 
-            // 1. Zaten devam eden bir oluşturma işlemi varsa anında engelle (çift tıklama / hızlı seçim koruması)
-            if (ticketCreationLocks.has(userId)) {
-                return interaction.reply({
-                    content: '⏳ Destek talebiniz zaten oluşturuluyor, lütfen bekleyin...',
-                    flags: MessageFlags.Ephemeral
-                });
+            // 1. Zaten devam eden bir işlem veya peş peşe hızlı tıklama varsa engelle
+            if (ticketCreationLocks.has(userId) || (now - lastAttempt < 4000)) {
+                if (!interaction.deferred && !interaction.replied) {
+                    await interaction.reply({
+                        content: '⏳ Destek talebiniz oluşturuluyor, lütfen birkaç saniye bekleyin...',
+                        flags: MessageFlags.Ephemeral
+                    }).catch(() => null);
+                }
+                return;
             }
 
             if (!interaction.guild || !interaction.channel) {
-                return interaction.reply({ content: '❌ Bu komut sadece sunucu içindeki metin kanallarında çalışır.', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: '❌ Bu komut sadece sunucu içindeki metin kanallarında çalışır.', flags: MessageFlags.Ephemeral }).catch(() => null);
             }
 
-            // Kilidi hemen ekle (asenkron işlemler başlamadan önce)
+            userTicketCooldown.set(userId, now);
             ticketCreationLocks.add(userId);
 
             try {
-                // Etkileşimi hemen defer et (Discord 3s timeout verip yeniden tetiklemesin)
+                // Etkileşimi hemen defer et (Discord 3s zaman aşımına düşmesin)
                 await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            } catch (deferErr) {
+                console.warn('[TICKET] deferReply hatası veya zaman aşımı:', deferErr);
+                ticketCreationLocks.delete(userId);
+                return;
+            }
 
-                // Kanalların en güncel halini Discord API'den senkronize et
-                await interaction.guild.channels.fetch().catch(() => null);
-
+            try {
                 const rawUsername = interaction.user.username.replace(/[^a-z0-9]/gi, '').toLowerCase();
                 const safeUsername = rawUsername.length > 0 ? rawUsername : userId;
 
-                // 2. Kullanıcının zaten açık bir destek talebi var mı kontrol et (Çok yönlü ve kesin kontrol)
+                // 2. Kullanıcının zaten açık bir destek talebi var mı kontrol et
                 const existingTicket = interaction.guild.channels.cache.find(c => {
                     if (!c || c.type !== 0) return false;
                     const chName = (c.name || '').toLowerCase();
@@ -383,7 +392,7 @@ async function handleInteraction(interaction: Interaction, client: Client) {
                 if (existingTicket) {
                     await interaction.editReply({
                         content: `❌ Zaten açık bir destek talebiniz bulunuyor: <#${existingTicket.id}>`
-                    });
+                    }).catch(() => null);
                     return;
                 }
 
@@ -472,15 +481,30 @@ async function handleInteraction(interaction: Interaction, client: Client) {
 
                 const parentId = (interaction.channel as any)?.parentId || undefined;
 
-                const ch = await interaction.guild.channels.create({
-                    name,
-                    type: 0,
-                    topic: `ticket-owner:${userId} | ${interaction.user.tag}`,
-                    parent: parentId,
-                    permissionOverwrites: overwrites
-                });
+                let ch: any;
+                try {
+                    ch = await interaction.guild.channels.create({
+                        name,
+                        type: 0,
+                        topic: `ticket-owner:${userId} | ${interaction.user.tag}`,
+                        parent: parentId,
+                        permissionOverwrites: overwrites
+                    });
+                } catch (createErr: any) {
+                    console.error('[TICKET] Kanal oluşturma API hatası:', createErr);
+                    await interaction.editReply({
+                        content: `❌ Destek talebi oluşturulamadı: ${createErr?.message || 'Botun sunucuda "Kanalları Yönet" yetkisi olduğundan emin olun.'}`
+                    }).catch(() => null);
+                    return;
+                }
 
-                if (ch) {
+                // 3. Kanal açıldıktan sonra kullanıcıya başarı yanıtını GECİKMEDEN ver!
+                await interaction.editReply({
+                    content: `✅ Destek talebiniz başarıyla oluşturuldu: <#${ch.id}>`
+                }).catch(() => null);
+
+                // 4. Kanal içine karşılama mesajı ve kapat butonunu gönder
+                try {
                     const closeBtn = new ActionRowBuilder<ButtonBuilder>().addComponents(
                         new ButtonBuilder()
                             .setCustomId('close_ticket')
@@ -499,27 +523,17 @@ async function handleInteraction(interaction: Interaction, client: Client) {
                         content: `<@${userId}> | Destek Talebiniz Açıldı`,
                         embeds: [emb],
                         components: [closeBtn]
-                    });
-
-                    await interaction.editReply({
-                        content: `✅ Destek talebiniz başarıyla oluşturuldu: <#${ch.id}>`
-                    });
-                    return;
+                    }).catch((err: any) => console.error('[TICKET] Karşılama mesajı gönderilemedi:', err));
+                } catch (msgErr: any) {
+                    console.error('[TICKET] Mesaj akışı hatası:', msgErr);
                 }
             } catch (e: any) {
-                console.error('[ERROR] Ticket oluşturma hatası:', e);
-                if (interaction.deferred) {
-                    await interaction.editReply({
-                        content: `❌ Destek talebi oluşturulamadı: ${e?.message || 'Botun yetkilerini kontrol edin.'}`
-                    }).catch(() => null);
-                } else {
-                    await safeReply(interaction, '❌ Destek talebi oluşturulamadı.');
-                }
+                console.error('[ERROR] Ticket akışı hatası:', e);
             } finally {
-                // Çift tıklamaları ve hızlı tekrar seçimleri kesinlikle önlemek için kilidi 5 saniye sonra serbest bırak
+                // Kilidi 4 saniye sonra serbest bırak
                 setTimeout(() => {
                     ticketCreationLocks.delete(userId);
-                }, 5000);
+                }, 4000);
             }
         }
 // --- 3. HANDLE MODAL SUBMITS ---
