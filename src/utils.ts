@@ -136,6 +136,89 @@ export function isTicketChannel(channel: any): boolean {
 }
 
 /**
+ * Kullanıcının sunucuda herhangi bir kategoride açık bir destek talebi var mı kontrol eder.
+ * (Kategori fark etmeksizin aynı anda en fazla 1 adet açık ticket kuralı)
+ */
+export async function getUserActiveTicket(guild: any, userId: string, username: string): Promise<any | null> {
+    if (!guild || !userId) return null;
+
+    // 1. Önce hafıza haritasına bak
+    const activeChId = userActiveTicketMap.get(userId);
+    if (activeChId) {
+        try {
+            const ch = guild.channels.cache.get(activeChId) || await guild.channels.fetch(activeChId).catch(() => null);
+            if (ch && !ch.deleted) {
+                return ch;
+            } else {
+                userActiveTicketMap.delete(userId);
+            }
+        } catch {
+            userActiveTicketMap.delete(userId);
+        }
+    }
+
+    // 2. Sunucudaki tüm kanalları API'den taze olarak çek
+    let allChannels: any;
+    try {
+        allChannels = await guild.channels.fetch();
+    } catch {
+        allChannels = guild.channels.cache;
+    }
+
+    if (!allChannels || allChannels.size === 0) {
+        allChannels = guild.channels.cache;
+    }
+
+    const safeUsername = (username || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    for (const [, c] of allChannels) {
+        if (!c || c.type !== 0) continue; // Sadece text kanalları
+
+        const chName = (c.name || '').toLowerCase();
+        const topic = (c.topic || '').toLowerCase();
+
+        // A) Konu kontrolü: "ticket-owner:USER_ID" veya direkt "USER_ID"
+        if (topic.includes(userId)) {
+            userActiveTicketMap.set(userId, c.id);
+            return c;
+        }
+
+        // B) Kanal adı kontrolü
+        const isTicketPrefix = chName.startsWith('genel-sorular-') || 
+                               chName.startsWith('teknik-destek-') || 
+                               chName.startsWith('satin-alim-') || 
+                               chName.startsWith('destek-') || 
+                               chName.startsWith('ticket-');
+
+        if (isTicketPrefix) {
+            // İsimde kullanıcı ID'si geçiyor mu?
+            if (chName.includes(userId)) {
+                userActiveTicketMap.set(userId, c.id);
+                return c;
+            }
+            // İsimde kullanıcı adı geçiyor mu?
+            if (safeUsername && safeUsername.length >= 2 && chName.includes(safeUsername)) {
+                userActiveTicketMap.set(userId, c.id);
+                return c;
+            }
+        }
+
+        // C) Kanal izinleri kontrolü: Bu kullanıcıya özel ViewChannel verilmiş mi?
+        try {
+            const overwrite = c.permissionOverwrites?.cache?.get(userId);
+            if (overwrite && overwrite.allow?.has(PermissionFlagsBits.ViewChannel)) {
+                if (isTicketPrefix || topic.includes('ticket')) {
+                    userActiveTicketMap.set(userId, c.id);
+                    return c;
+                }
+            }
+        } catch {}
+    }
+
+    return null;
+}
+
+/**
  * Ortak ve hatasız Ticket Kapatma ve Arşivleme Fonksiyonu
  */
 export async function handleCloseTicket(interaction: any): Promise<void> {
