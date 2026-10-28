@@ -61,6 +61,9 @@ export async function safeReply(interaction: Interaction, content: string): Prom
 // Global lock to prevent race conditions when closing tickets
 export const ticketClosingLocks = new Set<string>();
 
+// Kullanıcıların aktif açık ticket kanallarını hafızada tutan harita (userId -> channelId)
+export const userActiveTicketMap = new Map<string, string>();
+
 /**
  * Kullanıcı sunucuda yetkili mi? (Yönetici izni, Kanalları Yönet, Kurucu, Ortak Kurucu veya Yetkili rolü)
  */
@@ -105,34 +108,12 @@ export function isStaffMember(member: any): boolean {
 }
 
 /**
- * Kullanıcı bu ticket'ı kapatmaya yetkili mi? (Yetkili veya bileti açan kişi)
+ * Kullanıcı bu ticket'ı kapatmaya yetkili mi? (SADECE Yetkililer / Yöneticiler kapatabilir!)
+ * Normal member üyeler ticket KAPATAMAZ.
  */
 export function canCloseTicket(channel: any, user: User | any, member: any): boolean {
-    if (!channel || !user) return false;
-
-    // 1. Yönetici veya yetkili ise her zaman kapatabilir
-    if (isStaffMember(member)) return true;
-
-    // 2. Ticket konusu içinde kullanıcının ID'si kayıtlı mı?
-    if (channel.topic && typeof channel.topic === 'string' && channel.topic.includes(user.id)) {
-        return true;
-    }
-
-    // 3. Kanal izinlerinde bu kullanıcıya özel izin verilmiş mi?
-    try {
-        if (channel.permissionOverwrites?.cache?.has(user.id)) {
-            const overwrite = channel.permissionOverwrites.cache.get(user.id);
-            if (overwrite?.allow?.has(PermissionFlagsBits.ViewChannel)) return true;
-        }
-    } catch {}
-
-    // 4. Kanal adında kullanıcının adı veya ID'si geçiyor mu?
-    const sanitizedUsername = (user.username || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
-    const chName = (channel.name || '').toLowerCase();
-    if (sanitizedUsername && chName.endsWith(sanitizedUsername)) return true;
-    if (user.id && chName.endsWith(user.id)) return true;
-
-    return false;
+    if (!channel || !member) return false;
+    return isStaffMember(member);
 }
 
 /**
@@ -183,36 +164,49 @@ export async function handleCloseTicket(interaction: any): Promise<void> {
         const member = interaction.member;
         const user = interaction.user;
 
-        // Yetki kontrolü (Yetkili VEYA bileti açan kişi kapatabilir)
+        // Yetki kontrolü (SADECE YETKİLİLER kapatabilir)
         if (!canCloseTicket(channel, user, member)) {
             ticketClosingLocks.delete(channelId);
-            await safeReply(interaction, '❌ Bu bileti sadece **bileti açan kişi** veya **yöneticiler** kapatabilir!');
+            await safeReply(interaction, '❌ Bu destek talebini sadece **yetkililer** kapatabilir!');
             return;
         }
 
-        // 1. Bildirim ver
-        if (!interaction.replied && !interaction.deferred) {
-            await interaction.reply({ content: '🔒 **Ticket kapatılıyor...** Kanal kilitlendi ve arşiv hazırlanıyor.' }).catch(() => null);
-        } else {
-            await interaction.followUp({ content: '🔒 **Ticket kapatılıyor...** Kanal kilitlendi ve arşiv hazırlanıyor.' }).catch(() => null);
-        }
+        // 1. Yetkiliye hemen bildirim ver
+        await safeReply(interaction, '🔒 **Ticket kapatılıyor...** Kanal kilitlendi ve arşiv hazırlanıyor.');
 
         // 2. Butonları hemen kaldır (Başka kimsenin basamaması için)
         try {
-            if (interaction.isButton && interaction.isButton() && interaction.message) {
+            if (interaction.message && typeof interaction.message.edit === 'function') {
                 await interaction.message.edit({ components: [] }).catch(() => null);
             }
         } catch {}
 
-        // 3. Kanalı kilitle: Normal üyelerin mesaj yazmasını engelle
+        // 3. Kanalı anında kilitle: Normal üyelerin mesaj yazmasını engelle
         try {
             if (interaction.guild && channel.permissionOverwrites) {
                 await channel.permissionOverwrites.edit(interaction.guild.id, {
                     SendMessages: false,
                     ViewChannel: false
                 }).catch(() => null);
+
+                // Varsa ticket açan kullanıcının da mesaj atmasını engelle
+                if (channel.topic && typeof channel.topic === 'string') {
+                    const match = channel.topic.match(/ticket-owner:(\d+)/);
+                    if (match && match[1]) {
+                        userActiveTicketMap.delete(match[1]);
+                        await channel.permissionOverwrites.edit(match[1], {
+                            SendMessages: false
+                        }).catch(() => null);
+                    }
+                }
             }
         } catch {}
+
+        // Kanala yetkili tarafından kilitlendiği bilgisini gönder
+        await channel.send({
+            content: `🔒 **Destek talebi ${user} tarafından sonlandırıldı.** Kanal kilitlendi, transkript oluşturuluyor...`
+        }).catch(() => null);
+
 
         // 4. Kanal mesajlarını çek (Transkript için)
         let msgsArray: any[] = [];
