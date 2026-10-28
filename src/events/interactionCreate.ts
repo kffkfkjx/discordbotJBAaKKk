@@ -393,6 +393,20 @@ async function handleInteraction(interaction: Interaction, client: Client) {
                     });
                 }
 
+                if (CONFIG.ROLES.YETKILI) {
+                    overwrites.push({
+                        id: CONFIG.ROLES.YETKILI,
+                        allow: [
+                            PermissionFlagsBits.ViewChannel,
+                            PermissionFlagsBits.SendMessages,
+                            PermissionFlagsBits.ReadMessageHistory,
+                            PermissionFlagsBits.ManageMessages,
+                            PermissionFlagsBits.AttachFiles,
+                            PermissionFlagsBits.EmbedLinks
+                        ]
+                    });
+                }
+
                 const ch = await interaction.guild.channels.create({
                     name,
                     type: 0,
