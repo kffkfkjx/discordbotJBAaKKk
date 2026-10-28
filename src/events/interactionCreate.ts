@@ -1,6 +1,6 @@
 import { Events, Interaction, Client, GuildMember, EmbedBuilder, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import { CONFIG } from '../config';
-import { safeReply, truncate, handleCloseTicket } from '../utils';
+import { safeReply, truncate, handleCloseTicket, userActiveTicketMap } from '../utils';
 
 // Locks and cooldowns to prevent race conditions for ticket creation
 const ticketCreationLocks = new Set<string>();
@@ -337,7 +337,7 @@ async function handleInteraction(interaction: Interaction, client: Client) {
             if (ticketCreationLocks.has(userId) || (now - lastAttempt < 4000)) {
                 if (!interaction.deferred && !interaction.replied) {
                     await interaction.reply({
-                        content: '⏳ Destek talebiniz oluşturuluyor, lütfen birkaç saniye bekleyin...',
+                        content: '⏳ Destek talebi işleminiz devam ediyor, lütfen birkaç saniye bekleyin...',
                         flags: MessageFlags.Ephemeral
                     }).catch(() => null);
                 }
@@ -361,35 +361,74 @@ async function handleInteraction(interaction: Interaction, client: Client) {
             }
 
             try {
-                const rawUsername = interaction.user.username.replace(/[^a-z0-9]/gi, '').toLowerCase();
+                // 1. Hafızadaki aktif ticket kontrolü
+                const activeChId = userActiveTicketMap.get(userId);
+                if (activeChId) {
+                    const existingCh = interaction.guild.channels.cache.get(activeChId) || 
+                                       await interaction.guild.channels.fetch(activeChId).catch(() => null);
+                    if (existingCh) {
+                        ticketCreationLocks.delete(userId);
+                        await interaction.editReply({
+                            content: `❌ Zaten açık bir destek talebiniz bulunuyor: <#${existingCh.id}>`
+                        }).catch(() => null);
+                        return;
+                    } else {
+                        userActiveTicketMap.delete(userId);
+                    }
+                }
+
+                // 2. Sunucudaki tüm kanalları API'den taze olarak çekip tara
+                let allGuildChannels: any;
+                try {
+                    allGuildChannels = await interaction.guild.channels.fetch();
+                } catch {
+                    allGuildChannels = interaction.guild.channels.cache;
+                }
+
+                const rawUsername = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '');
                 const safeUsername = rawUsername.length > 0 ? rawUsername : userId;
 
-                // 2. Kullanıcının zaten açık bir destek talebi var mı kontrol et
-                const existingTicket = interaction.guild.channels.cache.find(c => {
+                const existingTicket = allGuildChannels.find((c: any) => {
                     if (!c || c.type !== 0) return false;
+
+                    // 1) Topic içinde "ticket-owner:USER_ID" veya "USER_ID" var mı?
+                    if (c.topic && typeof c.topic === 'string' && c.topic.includes(userId)) {
+                        return true;
+                    }
+
+                    // 2) Kanal izinlerinde bu kullanıcıya özel ViewChannel izni verilmiş mi?
+                    try {
+                        const userOverwrite = c.permissionOverwrites?.cache?.get(userId);
+                        if (userOverwrite && userOverwrite.allow?.has(PermissionFlagsBits.ViewChannel)) {
+                            const chName = (c.name || '').toLowerCase();
+                            if (chName.startsWith('genel-sorular-') || 
+                                chName.startsWith('teknik-destek-') || 
+                                chName.startsWith('satin-alim-') || 
+                                chName.startsWith('destek-') ||
+                                chName.startsWith('ticket-')) {
+                                return true;
+                            }
+                        }
+                    } catch {}
+
+                    // 3) Kanal adında kullanıcının adı veya ID'si var mı?
                     const chName = (c.name || '').toLowerCase();
                     const isTicketPrefix = chName.startsWith('genel-sorular-') || 
                                            chName.startsWith('teknik-destek-') || 
                                            chName.startsWith('satin-alim-') || 
-                                           chName.startsWith('destek-');
-                    if (!isTicketPrefix) return false;
+                                           chName.startsWith('destek-') ||
+                                           chName.startsWith('ticket-');
+                    if (isTicketPrefix) {
+                        if (chName.includes(userId)) return true;
+                        if (safeUsername && safeUsername.length >= 3 && chName.endsWith(safeUsername)) return true;
+                    }
 
-                    // 1) Topic içinde kullanıcı ID'si var mı?
-                    if ((c as any).topic && typeof (c as any).topic === 'string' && (c as any).topic.includes(userId)) {
-                        return true;
-                    }
-                    // 2) Kanal adında kullanıcı adı veya ID'si var mı?
-                    if (chName.endsWith(`-${safeUsername}`) || chName.endsWith(`-${userId}`)) {
-                        return true;
-                    }
-                    // 3) Kanal izinlerinde bu kullanıcıya özel ViewChannel verilmiş mi?
-                    if ((c as any).permissionOverwrites?.cache?.get(userId)?.allow?.has(PermissionFlagsBits.ViewChannel)) {
-                        return true;
-                    }
                     return false;
                 });
 
                 if (existingTicket) {
+                    userActiveTicketMap.set(userId, existingTicket.id);
+                    ticketCreationLocks.delete(userId);
                     await interaction.editReply({
                         content: `❌ Zaten açık bir destek talebiniz bulunuyor: <#${existingTicket.id}>`
                     }).catch(() => null);
@@ -492,11 +531,15 @@ async function handleInteraction(interaction: Interaction, client: Client) {
                     });
                 } catch (createErr: any) {
                     console.error('[TICKET] Kanal oluşturma API hatası:', createErr);
+                    ticketCreationLocks.delete(userId);
                     await interaction.editReply({
                         content: `❌ Destek talebi oluşturulamadı: ${createErr?.message || 'Botun sunucuda "Kanalları Yönet" yetkisi olduğundan emin olun.'}`
                     }).catch(() => null);
                     return;
                 }
+
+                // Aktif ticket haritasına kaydet
+                userActiveTicketMap.set(userId, ch.id);
 
                 // 3. Kanal açıldıktan sonra kullanıcıya başarı yanıtını GECİKMEDEN ver!
                 await interaction.editReply({
@@ -508,14 +551,14 @@ async function handleInteraction(interaction: Interaction, client: Client) {
                     const closeBtn = new ActionRowBuilder<ButtonBuilder>().addComponents(
                         new ButtonBuilder()
                             .setCustomId('close_ticket')
-                            .setLabel('Talebi Kapat')
+                            .setLabel('Talebi Kapat (Yetkili)')
                             .setEmoji('🔒')
                             .setStyle(ButtonStyle.Danger)
                     );
                     
                     const emb = new EmbedBuilder()
                         .setTitle('🎫 Destek Talebi')
-                        .setDescription(`Merhaba <@${userId}>, yetkililer en kısa sürede seninle ilgilenecektir.\n\n📂 **Kategori:** ${catLabel}\n🔒 **Talebi sonlandırmak için:** Aşağıdaki **Talebi Kapat** butonuna basabilir veya \`/ticketkapat\` yazabilirsiniz.`)
+                        .setDescription(`Merhaba <@${userId}>, yetkililerimiz en kısa sürede seninle ilgilenecektir.\n\n📂 **Kategori:** ${catLabel}\n🔒 **Bilgi:** Bu talep sadece **yetkililer** tarafından kapatılabilir.`)
                         .setColor('#2F3136')
                         .setTimestamp();
 
