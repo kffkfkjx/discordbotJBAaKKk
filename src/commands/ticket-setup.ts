@@ -1,4 +1,5 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, MessageFlags } from 'discord.js';
+import { isStaffMember } from '../utils';
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -7,6 +8,13 @@ module.exports = {
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
         
     async execute(interaction: ChatInputCommandInteraction) {
+        if (!isStaffMember(interaction.member)) {
+            return interaction.reply({
+                content: '❌ Bu komutu sadece yöneticiler (Kurucu, Ortak Kurucu veya Yönetici) kullanabilir.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
         const embed = new EmbedBuilder()
             .setTitle('👋 NexoGame Destek Merkezine Hoş Geldin!')
             .setDescription('📥 Aşağıdaki açılır menüden sana uygun olan kategoriyi seçerek anında destek talebi (ticket) oluşturabilirsin. Ekibimiz en kısa sürede seninle ilgilenecektir.')
@@ -48,7 +56,7 @@ module.exports = {
 
         await interaction.reply({ 
             content: 'Ticket sistemi başarıyla kuruldu.', 
-            ephemeral: true 
+            flags: MessageFlags.Ephemeral 
         });
 
         const channel = interaction.channel;
