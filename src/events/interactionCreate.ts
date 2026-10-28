@@ -1,6 +1,6 @@
 import { Events, Interaction, Client, GuildMember, EmbedBuilder, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder , MessageFlags } from 'discord.js';
 import { CONFIG } from '../config';
-import { safeReply, truncate } from '../utils';
+import { safeReply, truncate, handleCloseTicket } from '../utils';
 
 module.exports = {
     name: Events.InteractionCreate,
@@ -60,48 +60,7 @@ async function handleInteraction(interaction: Interaction, client: Client) {
 
         // --- 2. HANDLE BUTTON INTERACTIONS ---
         if (interaction.isButton() && interaction.customId === 'close_ticket') {
-            const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
-            if (!isAdmin) {
-                return interaction.reply({ content: 'Bu bileti sadece yöneticiler kapatabilir!', flags: MessageFlags.Ephemeral });
-            }
-
-            await interaction.reply({ content: '🔒 Ticket kapatılıyor... Arşiv (log) hazırlanıyor.' });
-
-            try {
-                if (interaction.channel) {
-                    const messages = await interaction.channel.messages.fetch({ limit: 100 });
-                    const msgsArray = Array.from(messages.values()).reverse();
-                    
-                    let transcript = `--- TICKET LOG (${(interaction.channel as any).name}) ---\n\n`;
-                    msgsArray.forEach(m => {
-                        const date = new Date(m.createdTimestamp).toLocaleString('tr-TR');
-                        transcript += `[${date}] ${m.author?.tag ?? 'Bilinmeyen Kullanıcı'}: ${m.content}\n`;
-                    });
-
-                    const { AttachmentBuilder } = require('discord.js');
-                    const transcriptAttachment = new AttachmentBuilder(Buffer.from(transcript, 'utf-8'), { name: `${(interaction.channel as any).name}-log.txt` });
-
-                    const logChannel = interaction.client.channels.cache.get(CONFIG.CHANNELS.TICKET_LOG_CHANNEL);
-                    if (logChannel) {
-                        const logEmbed = new EmbedBuilder()
-                            .setTitle('🎫 Ticket Kapatıldı ve Arşivlendi')
-                            .setColor('#FF0000')
-                            .addFields(
-                                { name: 'Kapatan Yetkili', value: `<@${interaction.user.id}>`, inline: true },
-                                { name: 'Ticket Adı', value: `${(interaction.channel as any).name}`, inline: true }
-                            )
-                            .setTimestamp();
-                        await (logChannel as any).send({ embeds: [logEmbed], files: [transcriptAttachment] }).catch(()=>null);
-                    }
-                    
-                    setTimeout(() => {
-                        if (interaction.channel) interaction.channel.delete().catch(()=>null);
-                    }, 4000);
-                }
-            } catch (err) {
-                console.error('[ERROR] Ticket loglama hatası:', err);
-                if (interaction.channel) interaction.channel.delete().catch(()=>null);
-            }
+            await handleCloseTicket(interaction);
             return;
         }
 
@@ -368,7 +327,9 @@ async function handleInteraction(interaction: Interaction, client: Client) {
             else if (val === 'ticket_satin') cat = 'satin-alim';
             
 
-            const name = cat + '-' + interaction.user.username.replace(/[^a-z0-9]/gi, '');
+            const rawUsername = interaction.user.username.replace(/[^a-z0-9]/gi, '').toLowerCase();
+            const safeUsername = rawUsername.length > 0 ? rawUsername : interaction.user.id;
+            const name = `${cat}-${safeUsername}`;
 
             try {
                 if (!interaction.guild || !interaction.channel || !('parentId' in interaction.channel)) {
@@ -378,15 +339,66 @@ async function handleInteraction(interaction: Interaction, client: Client) {
                 // Kanal oluşturma 3 saniyeyi aşabilir; etkileşim zaman aşımına düşmesin diye önce erteliyoruz
                 await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+                const overwrites: any[] = [
+                    { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                    { 
+                        id: interaction.user.id, 
+                        allow: [
+                            PermissionFlagsBits.ViewChannel, 
+                            PermissionFlagsBits.SendMessages, 
+                            PermissionFlagsBits.ReadMessageHistory,
+                            PermissionFlagsBits.AttachFiles,
+                            PermissionFlagsBits.EmbedLinks
+                        ] 
+                    },
+                    { 
+                        id: interaction.client.user.id, 
+                        allow: [
+                            PermissionFlagsBits.ViewChannel, 
+                            PermissionFlagsBits.SendMessages, 
+                            PermissionFlagsBits.ReadMessageHistory,
+                            PermissionFlagsBits.ManageChannels,
+                            PermissionFlagsBits.ManageMessages,
+                            PermissionFlagsBits.AttachFiles,
+                            PermissionFlagsBits.EmbedLinks
+                        ] 
+                    }
+                ];
+
+                if (CONFIG.ROLES.FOUNDER) {
+                    overwrites.push({
+                        id: CONFIG.ROLES.FOUNDER,
+                        allow: [
+                            PermissionFlagsBits.ViewChannel,
+                            PermissionFlagsBits.SendMessages,
+                            PermissionFlagsBits.ReadMessageHistory,
+                            PermissionFlagsBits.ManageMessages,
+                            PermissionFlagsBits.AttachFiles,
+                            PermissionFlagsBits.EmbedLinks
+                        ]
+                    });
+                }
+
+                if (CONFIG.ROLES.CO_FOUNDER) {
+                    overwrites.push({
+                        id: CONFIG.ROLES.CO_FOUNDER,
+                        allow: [
+                            PermissionFlagsBits.ViewChannel,
+                            PermissionFlagsBits.SendMessages,
+                            PermissionFlagsBits.ReadMessageHistory,
+                            PermissionFlagsBits.ManageMessages,
+                            PermissionFlagsBits.AttachFiles,
+                            PermissionFlagsBits.EmbedLinks
+                        ]
+                    });
+                }
+
                 const ch = await interaction.guild.channels.create({
                     name,
                     type: 0,
-                    parent: interaction.channel.parentId as string,
-                    permissionOverwrites: [
-                        { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-                        { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
-                    ]
+                    topic: `ticket-owner:${interaction.user.id} | ${interaction.user.tag}`,
+                    parent: (interaction.channel as any).parentId as string,
+                    permissionOverwrites: overwrites
                 });
 
                 if (ch) {
