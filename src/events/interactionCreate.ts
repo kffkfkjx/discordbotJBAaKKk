@@ -1,10 +1,9 @@
-import { Events, Interaction, Client, GuildMember, EmbedBuilder, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder , MessageFlags } from 'discord.js';
+import { Events, Interaction, Client, GuildMember, EmbedBuilder, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import { CONFIG } from '../config';
-
-// Locks to prevent race conditions for ticket creation and closing
-const ticketCreationLocks = new Set<string>();
-const ticketClosingLocks = new Set<string>();
 import { safeReply, truncate, handleCloseTicket } from '../utils';
+
+// Locks to prevent race conditions for ticket creation
+const ticketCreationLocks = new Set<string>();
 
 
 
@@ -66,19 +65,7 @@ async function handleInteraction(interaction: Interaction, client: Client) {
 
         // --- 2. HANDLE BUTTON INTERACTIONS ---
         if (interaction.isButton() && interaction.customId === 'close_ticket') {
-            const channelId = (interaction.channel && 'id' in interaction.channel) ? interaction.channel.id : '';
-            if (ticketClosingLocks.has(channelId)) {
-                return interaction.reply({
-                    content: '⏳ Ticket zaten kapanıyor, lütfen bekleyin...',
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-            ticketClosingLocks.add(channelId);
-            try {
-                await handleCloseTicket(interaction);
-            } finally {
-                ticketClosingLocks.delete(channelId);
-            }
+            await handleCloseTicket(interaction);
             return;
         }
 
@@ -337,54 +324,88 @@ async function handleInteraction(interaction: Interaction, client: Client) {
         
         if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
             const val = interaction.values[0];
-            if (val === 'ticket_reset') return interaction.reply({ content: 'Seçim sıfırlandı.', flags: MessageFlags.Ephemeral });
+            if (val === 'ticket_reset') {
+                return interaction.reply({ content: '🔄 Seçim sıfırlandı.', flags: MessageFlags.Ephemeral });
+            }
 
-            // 1. Zaten devam eden bir oluşturma işlemi varsa ikinciyi engelle (çift tıklama / hızlı seçim koruması)
-            if (ticketCreationLocks.has(interaction.user.id)) {
+            const userId = interaction.user.id;
+
+            // 1. Zaten devam eden bir oluşturma işlemi varsa anında engelle (çift tıklama / hızlı seçim koruması)
+            if (ticketCreationLocks.has(userId)) {
                 return interaction.reply({
                     content: '⏳ Destek talebiniz zaten oluşturuluyor, lütfen bekleyin...',
                     flags: MessageFlags.Ephemeral
                 });
             }
 
-            if (!interaction.guild || !interaction.channel || !('parentId' in interaction.channel)) {
-                return interaction.reply({ content: 'Bu komut sadece sunucu içindeki metin kanallarında çalışır.', flags: MessageFlags.Ephemeral });
-            }
-
-            // 2. Kullanıcının zaten açık bir destek talebi var mı kontrol et
-            const existingTicket = interaction.guild.channels.cache.find(c => 
-                c.isTextBased() && 
-                'topic' in c && 
-                Boolean(c.topic && c.topic.includes(`ticket-owner:${interaction.user.id}`))
-            );
-
-            if (existingTicket) {
-                return interaction.reply({
-                    content: `❌ Zaten açık bir destek talebiniz bulunuyor: <#${existingTicket.id}>`,
-                    flags: MessageFlags.Ephemeral
-                });
+            if (!interaction.guild || !interaction.channel) {
+                return interaction.reply({ content: '❌ Bu komut sadece sunucu içindeki metin kanallarında çalışır.', flags: MessageFlags.Ephemeral });
             }
 
             // Kilidi hemen ekle (asenkron işlemler başlamadan önce)
-            ticketCreationLocks.add(interaction.user.id);
-
-            let cat = 'destek';
-            if (val === 'ticket_genel') cat = 'genel-sorular';
-            else if (val === 'ticket_teknik') cat = 'teknik-destek';
-            else if (val === 'ticket_satin') cat = 'satin-alim';
-
-            const rawUsername = interaction.user.username.replace(/[^a-z0-9]/gi, '').toLowerCase();
-            const safeUsername = rawUsername.length > 0 ? rawUsername : interaction.user.id;
-            const name = `${cat}-${safeUsername}`;
+            ticketCreationLocks.add(userId);
 
             try {
-                // Kanal oluşturma 3 saniyeyi aşabilir; etkileşim zaman aşımına düşmesin diye önce erteliyoruz
+                // Etkileşimi hemen defer et (Discord 3s timeout verip yeniden tetiklemesin)
                 await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+                // Kanalların en güncel halini Discord API'den senkronize et
+                await interaction.guild.channels.fetch().catch(() => null);
+
+                const rawUsername = interaction.user.username.replace(/[^a-z0-9]/gi, '').toLowerCase();
+                const safeUsername = rawUsername.length > 0 ? rawUsername : userId;
+
+                // 2. Kullanıcının zaten açık bir destek talebi var mı kontrol et (Çok yönlü ve kesin kontrol)
+                const existingTicket = interaction.guild.channels.cache.find(c => {
+                    if (!c || c.type !== 0) return false;
+                    const chName = (c.name || '').toLowerCase();
+                    const isTicketPrefix = chName.startsWith('genel-sorular-') || 
+                                           chName.startsWith('teknik-destek-') || 
+                                           chName.startsWith('satin-alim-') || 
+                                           chName.startsWith('destek-');
+                    if (!isTicketPrefix) return false;
+
+                    // 1) Topic içinde kullanıcı ID'si var mı?
+                    if ((c as any).topic && typeof (c as any).topic === 'string' && (c as any).topic.includes(userId)) {
+                        return true;
+                    }
+                    // 2) Kanal adında kullanıcı adı veya ID'si var mı?
+                    if (chName.endsWith(`-${safeUsername}`) || chName.endsWith(`-${userId}`)) {
+                        return true;
+                    }
+                    // 3) Kanal izinlerinde bu kullanıcıya özel ViewChannel verilmiş mi?
+                    if ((c as any).permissionOverwrites?.cache?.get(userId)?.allow?.has(PermissionFlagsBits.ViewChannel)) {
+                        return true;
+                    }
+                    return false;
+                });
+
+                if (existingTicket) {
+                    await interaction.editReply({
+                        content: `❌ Zaten açık bir destek talebiniz bulunuyor: <#${existingTicket.id}>`
+                    });
+                    return;
+                }
+
+                let cat = 'destek';
+                let catLabel = 'Genel Destek';
+                if (val === 'ticket_genel') {
+                    cat = 'genel-sorular';
+                    catLabel = 'Genel Destek';
+                } else if (val === 'ticket_teknik') {
+                    cat = 'teknik-destek';
+                    catLabel = 'Teknik Destek';
+                } else if (val === 'ticket_satin') {
+                    cat = 'satin-alim';
+                    catLabel = 'Satın Alım';
+                }
+
+                const name = `${cat}-${safeUsername}`;
 
                 const overwrites: any[] = [
                     { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
                     { 
-                        id: interaction.user.id, 
+                        id: userId, 
                         allow: [
                             PermissionFlagsBits.ViewChannel, 
                             PermissionFlagsBits.SendMessages, 
@@ -449,42 +470,56 @@ async function handleInteraction(interaction: Interaction, client: Client) {
                     });
                 }
 
+                const parentId = (interaction.channel as any)?.parentId || undefined;
+
                 const ch = await interaction.guild.channels.create({
                     name,
                     type: 0,
-                    topic: `ticket-owner:${interaction.user.id} | ${interaction.user.tag}`,
-                    parent: (interaction.channel as any).parentId as string,
+                    topic: `ticket-owner:${userId} | ${interaction.user.tag}`,
+                    parent: parentId,
                     permissionOverwrites: overwrites
                 });
 
                 if (ch) {
-                    const { ButtonBuilder, ButtonStyle, ActionRowBuilder: LocalActionRowBuilder } = require('discord.js');
-                    const closeBtn = new LocalActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('close_ticket').setLabel('Talebi Kapat').setEmoji('🔒').setStyle(ButtonStyle.Danger)
+                    const closeBtn = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                        new ButtonBuilder()
+                            .setCustomId('close_ticket')
+                            .setLabel('Talebi Kapat')
+                            .setEmoji('🔒')
+                            .setStyle(ButtonStyle.Danger)
                     );
                     
                     const emb = new EmbedBuilder()
-                        .setTitle('Destek Talebi')
-                        .setDescription('Merhaba <@' + interaction.user.id + '>, yetkililer en kısa sürede seninle ilgilenecektir.\n**Kategori:** ' + cat)
-                        .setColor('#2F3136');
+                        .setTitle('🎫 Destek Talebi')
+                        .setDescription(`Merhaba <@${userId}>, yetkililer en kısa sürede seninle ilgilenecektir.\n\n📂 **Kategori:** ${catLabel}\n🔒 **Talebi sonlandırmak için:** Aşağıdaki **Talebi Kapat** butonuna basabilir veya \`/ticketkapat\` yazabilirsiniz.`)
+                        .setColor('#2F3136')
+                        .setTimestamp();
 
-                    await ch.send({ content: '<@' + interaction.user.id + '>', embeds: [emb], components: [closeBtn] });
-                    await interaction.editReply({ content: '✅ Destek talebiniz oluşturuldu: <#' + ch.id + '>' });
+                    await ch.send({
+                        content: `<@${userId}> | Destek Talebiniz Açıldı`,
+                        embeds: [emb],
+                        components: [closeBtn]
+                    });
+
+                    await interaction.editReply({
+                        content: `✅ Destek talebiniz başarıyla oluşturuldu: <#${ch.id}>`
+                    });
                     return;
                 }
-            } catch (e) {
+            } catch (e: any) {
                 console.error('[ERROR] Ticket oluşturma hatası:', e);
                 if (interaction.deferred) {
-                    await interaction.editReply({ content: '❌ Destek talebi oluşturulamadı. Botun kanal oluşturma yetkisini kontrol edin.' }).catch(() => null);
+                    await interaction.editReply({
+                        content: `❌ Destek talebi oluşturulamadı: ${e?.message || 'Botun yetkilerini kontrol edin.'}`
+                    }).catch(() => null);
                 } else {
                     await safeReply(interaction, '❌ Destek talebi oluşturulamadı.');
                 }
-                return;
             } finally {
-                // Çift tıklamaları ve hızlı tekrar seçimleri önlemek için kilidi 4 saniye sonra serbest bırak
+                // Çift tıklamaları ve hızlı tekrar seçimleri kesinlikle önlemek için kilidi 5 saniye sonra serbest bırak
                 setTimeout(() => {
-                    ticketCreationLocks.delete(interaction.user.id);
-                }, 4000);
+                    ticketCreationLocks.delete(userId);
+                }, 5000);
             }
         }
 // --- 3. HANDLE MODAL SUBMITS ---
