@@ -18,12 +18,19 @@ declare module 'discord.js' {
 
 // Initialize Client function
 let client: Client | null = null;
+let isBotStartingOrRunning = false;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const BASE_RECONNECT_DELAY = 5000; // 5 seconds
 
 function startDiscordBot() {
-    if (client) return; // Already running
+    if (client || isBotStartingOrRunning) {
+        console.warn('[WARN] startDiscordBot() zaten çalışıyor, mükerrer başlatma engellendi.');
+        return;
+    }
+    isBotStartingOrRunning = true;
+
+    console.log(`[BOOT] Bot başlatılıyor... (PID: ${process.pid})`);
 
     client = new Client({
         intents: [
@@ -39,9 +46,16 @@ function startDiscordBot() {
     client.commands = new Collection();
     client.giveaways = new Collection();
 
-    // Load Commands
+    // Load Commands (Aynı isimli hem .ts hem .js varsa tek birini al)
     const commandsPath = path.join(__dirname, 'commands');
-    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.ts') || file.endsWith('.js'));
+    const rawCommandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.ts') || file.endsWith('.js'));
+    const loadedCmdBases = new Set<string>();
+    const commandFiles = rawCommandFiles.filter(file => {
+        const base = path.basename(file, path.extname(file));
+        if (loadedCmdBases.has(base)) return false;
+        loadedCmdBases.add(base);
+        return true;
+    });
 
     for (const file of commandFiles) {
         const filePath = path.join(commandsPath, file);
@@ -52,9 +66,16 @@ function startDiscordBot() {
         }
     }
 
-    // Load Events
+    // Load Events (Aynı isimli hem .ts hem .js varsa SADECE BİRİNİ bağla - çift dinleyici engeli!)
     const eventsPath = path.join(__dirname, 'events');
-    const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.ts') || file.endsWith('.js'));
+    const rawEventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.ts') || file.endsWith('.js'));
+    const loadedEventBases = new Set<string>();
+    const eventFiles = rawEventFiles.filter(file => {
+        const base = path.basename(file, path.extname(file));
+        if (loadedEventBases.has(base)) return false;
+        loadedEventBases.add(base);
+        return true;
+    });
 
     const botClient = client;
     for (const file of eventFiles) {
@@ -117,6 +138,7 @@ function scheduleReconnect() {
         } catch {}
         client = null;
     }
+    isBotStartingOrRunning = false;
 
     const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
     reconnectAttempts++;
@@ -133,6 +155,7 @@ function stopDiscordBot() {
             client.destroy();
         } catch {}
         client = null;
+        isBotStartingOrRunning = false;
         reconnectAttempts = 0;
         console.log("[INFO] Bot kapatıldı (Dashboard üzerinden).");
     }
