@@ -1,31 +1,50 @@
 import { Events, GuildMember, AttachmentBuilder, TextChannel } from 'discord.js';
-import * as fs from 'fs';
-import * as path from 'path';
+import { readDb } from '../db';
 const Jimp = require('jimp');
 
 let cachedBackground: any = null;
 let cachedFontTitle: any = null;
 let cachedFontSub: any = null;
 
+// Mükerrer giriş loglarını engelleyen önbellek
+const processedJoins = new Map<string, number>();
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, time] of processedJoins) {
+        if (now - time > 60000) processedJoins.delete(key);
+    }
+}, 5 * 60 * 1000);
+
 module.exports = {
     name: Events.GuildMemberAdd,
     async execute(member: GuildMember, client: any) {
         if (member.user.bot) return;
 
-        const dbPath = path.join(__dirname, '..', 'db.json');
-        if (!fs.existsSync(dbPath)) return;
-
-        let db: any;
-        try {
-            db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-        } catch (e) {
+        // 1. Process içi mükerrer hoş geldin engeli
+        const now = Date.now();
+        const lastJoin = processedJoins.get(member.id);
+        if (lastJoin && (now - lastJoin < 30000)) {
             return;
         }
+        processedJoins.set(member.id, now);
 
+        const db = readDb();
         if (!db.welcomeChannel) return;
 
         const channel = member.guild.channels.cache.get(db.welcomeChannel) as TextChannel;
         if (!channel) return;
+
+        // 2. Çift bot / çift instance engeli: Son 5 mesajda bu üyeye hoş geldin atılmış mı
+        try {
+            const recent = await channel.messages.fetch({ limit: 5 }).catch(() => null);
+            if (recent) {
+                const alreadySent = recent.some((m: any) => 
+                    m.content?.includes(member.id) && (now - m.createdTimestamp < 20000)
+                );
+                if (alreadySent) return;
+            }
+        } catch {}
 
         try {
             // Load and cache background globally to save Render CPU/Network time
