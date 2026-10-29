@@ -2,15 +2,47 @@ import { Events, Message, PartialMessage, EmbedBuilder, Client } from 'discord.j
 import { CONFIG } from '../config';
 import { codeBlock, getSendableChannel } from '../utils';
 
+// Mükerrer tetiklenmeyi ve çift log gönderilmesini engelleyen önbellek
+const processedDeletions = new Map<string, number>();
+
+// 5 dakikada bir eski kayıtları temizle
+setInterval(() => {
+    const now = Date.now();
+    for (const [id, time] of processedDeletions) {
+        if (now - time > 60000) processedDeletions.delete(id);
+    }
+}, 5 * 60 * 1000);
+
 module.exports = {
     name: Events.MessageDelete,
     async execute(message: Message | PartialMessage, client: Client) {
         // DM mesajlarını ve bot mesajlarını yoksay
-        if (!message.guild) return;
+        if (!message.guild || !message.id) return;
         if (message.author?.bot) return;
+
+        // 1. Process içi mükerrer log engeli
+        const now = Date.now();
+        const lastProcessed = processedDeletions.get(message.id);
+        if (lastProcessed && (now - lastProcessed < 60000)) {
+            return;
+        }
+        processedDeletions.set(message.id, now);
 
         const logChannel = getSendableChannel(client, CONFIG.CHANNELS.LOG_CHANNEL);
         if (!logChannel) return;
+
+        // 2. Çift bot / çift instance engeli: Log kanalında bu mesaj ID'si son 5 mesajda zaten paylaşılmış mı kontrol et
+        try {
+            const recentMessages = await logChannel.messages.fetch({ limit: 5 }).catch(() => null);
+            if (recentMessages) {
+                const alreadyLogged = recentMessages.some((m: any) => 
+                    m.embeds?.[0]?.footer?.text?.includes(message.id)
+                );
+                if (alreadyLogged) {
+                    return; // Diğer bot / instance zaten loglamış, tekrar gönderme!
+                }
+            }
+        } catch {}
 
         // Mesaj önbellekte yoksa (bot yeniden başladıktan önce atılmış mesajlar) Discord
         // sadece ID gönderir; author ve content null olur. Bu yüzden her alan güvenli okunur.
