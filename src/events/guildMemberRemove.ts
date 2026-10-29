@@ -1,31 +1,50 @@
 import { Events, GuildMember, AttachmentBuilder, TextChannel } from 'discord.js';
-import * as fs from 'fs';
-import * as path from 'path';
+import { readDb } from '../db';
 const Jimp = require('jimp');
 
 let cachedBackground: any = null;
 let cachedFontTitle: any = null;
 let cachedFontSub: any = null;
 
+// Mükerrer çıkış loglarını engelleyen önbellek
+const processedLeaves = new Map<string, number>();
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, time] of processedLeaves) {
+        if (now - time > 60000) processedLeaves.delete(key);
+    }
+}, 5 * 60 * 1000);
+
 module.exports = {
     name: Events.GuildMemberRemove,
     async execute(member: GuildMember, client: any) {
         if (member.user.bot) return;
 
-        const dbPath = path.join(__dirname, '..', 'db.json');
-        if (!fs.existsSync(dbPath)) return;
-
-        let db: any;
-        try {
-            db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-        } catch (e) {
+        // 1. Process içi mükerrer çıkış engeli
+        const now = Date.now();
+        const lastLeave = processedLeaves.get(member.id);
+        if (lastLeave && (now - lastLeave < 30000)) {
             return;
         }
+        processedLeaves.set(member.id, now);
 
+        const db = readDb();
         if (!db.welcomeChannel) return;
 
         const channel = member.guild.channels.cache.get(db.welcomeChannel) as TextChannel;
         if (!channel) return;
+
+        // 2. Çift bot / çift instance engeli: Son 5 mesajda bu üyeye çıkış mesajı atılmış mı
+        try {
+            const recent = await channel.messages.fetch({ limit: 5 }).catch(() => null);
+            if (recent) {
+                const alreadySent = recent.some((m: any) => 
+                    m.content?.includes(member.user.tag) && (now - m.createdTimestamp < 20000)
+                );
+                if (alreadySent) return;
+            }
+        } catch {}
 
         try {
             if (!cachedBackground) {
