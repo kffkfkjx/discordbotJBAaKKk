@@ -385,9 +385,9 @@ export function startDashboard(startBotFn: () => void, stopBotFn: () => void) {
         res.json({ status: 'ok', uptime: process.uptime(), botRunning: isBotRunning });
     });
 
-    const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => {
-        console.log(`Uptime aktif: ${PORT}`);
-        console.log(`[DASHBOARD] Yönetim paneli http://localhost:${PORT}/panel adresinde çalışıyor.`);
+    const PORT = Number(process.env.PORT) || 3000;
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`[UPTIME] Web sunucusu 0.0.0.0:${PORT} adresinde dinliyor (7/24 Aktif).`);
+        console.log(`[DASHBOARD] Yönetim paneli: http://localhost:${PORT}/panel`);
     });
 }
