@@ -2,38 +2,44 @@ import { config } from 'dotenv';
 
 config();
 
-const PORT = process.env.PORT || 3000;
-
 export function startKeepAlive(): void {
-    // Render dış URL sağlarsa dış URL'e (böylece spin-down olmaz), yoksa localhost'a ping atar
+    // Render dış URL sağlarsa dış URL'e ping atar (böylece Render uykuya dalmaz)
     const externalUrl = process.env.RENDER_EXTERNAL_URL || process.env.EXTERNAL_URL;
-    const targetUrl = externalUrl
-        ? `${externalUrl.replace(/\/$/, '')}/health`
-        : `http://localhost:${PORT}/health`;
 
+    if (!externalUrl) {
+        console.log('[KEEPALIVE] RENDER_EXTERNAL_URL tanımlı değil; yerel ping pasif bırakıldı (dışarıdan uptime robot veya Render Web URL ile tetiklenebilir).');
+        return;
+    }
+
+    const targetUrl = `${externalUrl.replace(/\/$/, '')}/health`;
     console.log(`[KEEPALIVE] Hedef ping adresi: ${targetUrl}`);
 
     const ping = async () => {
         try {
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 10000);
-            const res = await fetch(targetUrl, { signal: controller.signal });
+            const timeout = setTimeout(() => controller.abort(), 15000);
+            const res = await fetch(targetUrl, { 
+                signal: controller.signal,
+                headers: { 'User-Agent': 'NexoBot-KeepAlive/1.0' }
+            });
             clearTimeout(timeout);
             if (res.ok) {
                 console.log(`[KEEPALIVE] Ping başarılı (${res.status}) -> ${targetUrl}`);
             } else {
-                console.warn(`[KEEPALIVE] Ping hata kodu: ${res.status}`);
+                console.warn(`[KEEPALIVE] Ping yanıt kodu: ${res.status}`);
             }
-        } catch (error) {
-            console.warn(`[KEEPALIVE] Ping başarısız:`, (error as Error).message);
+        } catch (error: any) {
+            // Sessizce yakala, geçici ağ dalgalanmalarında bot çökmesin
+            console.warn(`[KEEPALIVE] Ping geçici olarak ulaşılamadı: ${error?.message || error}`);
         }
     };
 
-    // Her 3 dakikada bir ping atarak Render'ın uykuya dalmasını (spin down) engelle
-    setInterval(ping, 3 * 60 * 1000);
+    // Bot ve Render build işlemi tamamen tamamlandıktan sonra (1 dakika sonra) ilk pingi at
+    setTimeout(() => {
+        ping();
+        // Render 15 dakikada uykuya dalar; her 5 dakikada bir ping atmak idealdir.
+        setInterval(ping, 5 * 60 * 1000);
+    }, 60000);
 
-    // İlk ping 10 saniye sonra
-    setTimeout(ping, 10000);
-
-    console.log('[KEEPALIVE] Keep-alive servisi başlatıldı (her 3 dakikada bir ping).');
+    console.log('[KEEPALIVE] Keep-alive servisi optimize edildi (build sonrası ilk ping 60sn, periyot 5dk).');
 }
