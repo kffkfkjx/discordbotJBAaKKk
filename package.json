@@ -2,17 +2,15 @@
   "name": "nexo-bot",
   "version": "1.0.0",
   "description": "Modern Discord Bot",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "engines": {
-    "node": ">=20"
+    "node": "20.x"
   },
   "scripts": {
-    "build": "node node_modules/typescript/bin/tsc",
-    "deploy": "node node_modules/ts-node/dist/bin.js --transpile-only src/deploy-commands.ts",
-    "start": "node node_modules/ts-node/dist/bin.js --transpile-only src/index.ts",
-    "render-build": "npm install && npm run build && npm run deploy",
-    "dev": "ts-node --transpile-only src/index.ts",
-    "dev:deploy": "ts-node --transpile-only src/deploy-commands.ts"
+    "build": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && node node_modules/typescript/bin/tsc",
+    "deploy": "npm run build && node dist/deploy-commands.js",
+    "start": "node dist/index.js",
+    "render-build": "npm install && npm run deploy"
   },
   "dependencies": {
     "@types/express": "^5.0.6",
