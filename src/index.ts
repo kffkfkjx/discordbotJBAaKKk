@@ -8,6 +8,15 @@ import { startKeepAlive } from './keepalive';
 // Load environment variables
 config();
 
+// Stray src/db.json varsa sil (ts-node'da require('../db') çakışmasını önler)
+try {
+    const strayDbJson = path.join(__dirname, 'db.json');
+    if (fs.existsSync(strayDbJson)) {
+        fs.unlinkSync(strayDbJson);
+        console.log('[CLEANUP] Çakışan src/db.json dosyası temizlendi.');
+    }
+} catch {}
+
 // Extend Client to hold commands and giveaways
 declare module 'discord.js' {
     export interface Client {
