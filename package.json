@@ -3,20 +3,24 @@
   "version": "1.0.0",
   "description": "Modern Discord Bot",
   "main": "src/index.ts",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "node node_modules/ts-node/dist/bin.js src/index.ts",
-    "deploy": "node node_modules/ts-node/dist/bin.js src/deploy-commands.ts",
-    "build": "node node_modules/typescript/bin/tsc"
+    "build": "node node_modules/typescript/bin/tsc",
+    "deploy": "node node_modules/ts-node/dist/bin.js --transpile-only src/deploy-commands.ts",
+    "start": "node node_modules/ts-node/dist/bin.js --transpile-only src/index.ts",
+    "render-build": "npm install && npm run build && npm run deploy",
+    "dev": "ts-node --transpile-only src/index.ts",
+    "dev:deploy": "ts-node --transpile-only src/deploy-commands.ts"
   },
   "dependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.14.9",
     "discord.js": "^14.15.3",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
-    "jimp": "^0.22.12"
-  },
-  "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/node": "^20.14.9",
+    "jimp": "^0.22.12",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
