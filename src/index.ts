@@ -1,3 +1,4 @@
+
 import { Client, GatewayIntentBits, Collection, Partials } from 'discord.js';
 import { config } from 'dotenv';
 import * as fs from 'fs';
@@ -19,6 +20,7 @@ console.log('[DEBUG] Environment kontrolü:', {
 // Stray src/db.json varsa sil
 try {
     const strayDbJson = path.join(__dirname, 'db.json');
+
     if (fs.existsSync(strayDbJson)) {
         fs.unlinkSync(strayDbJson);
         console.log('[CLEANUP] Çakışan src/db.json dosyası temizlendi.');
@@ -27,6 +29,7 @@ try {
     console.error('[CLEANUP ERROR]', error);
 }
 
+// Extend Client
 declare module 'discord.js' {
     export interface Client {
         commands: Collection<string, any>;
@@ -89,13 +92,16 @@ function startDiscordBot() {
 
     const commandFiles = rawCommandFiles.filter(file => {
         const base = path.basename(file, path.extname(file));
+
         if (loadedCmdBases.has(base)) return false;
+
         loadedCmdBases.add(base);
         return true;
     });
 
     for (const file of commandFiles) {
         const filePath = path.join(commandsPath, file);
+
         delete require.cache[require.resolve(filePath)];
 
         const command = require(filePath);
@@ -121,7 +127,9 @@ function startDiscordBot() {
 
     const eventFiles = rawEventFiles.filter(file => {
         const base = path.basename(file, path.extname(file));
+
         if (loadedEventBases.has(base)) return false;
+
         loadedEventBases.add(base);
         return true;
     });
@@ -130,6 +138,7 @@ function startDiscordBot() {
 
     for (const file of eventFiles) {
         const filePath = path.join(eventsPath, file);
+
         delete require.cache[require.resolve(filePath)];
 
         const event = require(filePath);
@@ -156,31 +165,9 @@ function startDiscordBot() {
 
     console.log(`[EVENTS] ${eventFiles.length} event dosyası tarandı.`);
 
-
-    // Discord bağlantı tanılama
-    console.log('[LOGIN] Discord giriş işlemi başlatılıyor...');
-
-    // Discord API erişim testi
-    fetch('https://discord.com/api/gateway')
-        .then(async response => {
-            console.log(`[NETWORK] Discord API HTTP: ${response.status}`);
-            console.log('[NETWORK] Discord API yanıtı:', await response.text());
-        })
-        .catch(error => {
-            console.error('[NETWORK ERROR] Discord API erişilemiyor:', error);
-        });
-
-    // Gateway olayları
-    client.once('ready', () => {
-        console.log('[GATEWAY] READY olayı başarıyla alındı.');
-    });
-
-    client.on('shardReady', shardId => {
-        console.log(`[GATEWAY] Shard ${shardId} hazır.`);
-    });
-
+    // Discord bağlantı olayları
     client.on('shardDisconnect', (event, shardId) => {
-        console.error(
+        console.warn(
             `[GATEWAY] Shard ${shardId} bağlantısı kesildi.`,
             'Kod:', event.code,
             'Sebep:', event.reason
@@ -191,43 +178,86 @@ function startDiscordBot() {
         console.error('[GATEWAY ERROR]', error);
     });
 
-    client.on('invalidated', () => {
-        console.error('[GATEWAY] Oturum geçersiz hale geldi!');
+    client.on('shardReconnecting', shardId => {
+        console.log(`[GATEWAY] Shard ${shardId} yeniden bağlanıyor.`);
     });
 
-    // WebSocket debug
+    client.on('shardReady', shardId => {
+        console.log(`[GATEWAY] Shard ${shardId} hazır.`);
+    });
+
+    client.on('error', error => {
+        console.error('[DISCORD CLIENT ERROR]', error);
+    });
+
+    client.on('warn', warning => {
+        console.warn('[DISCORD WARNING]', warning);
+    });
+
+    client.on('invalidated', () => {
+        console.error('[GATEWAY] Discord oturumu geçersiz hale geldi!');
+    });
+
     client.on('debug', info => {
         if (/ws|gateway|heartbeat|shard/i.test(info)) {
             console.log('[GATEWAY DEBUG]', info);
         }
     });
 
-    // 30 saniyelik bağlantı kontrolü
+    // Ready kontrolü
+    client.once('ready', () => {
+        console.log('[GATEWAY] READY olayı başarıyla alındı.');
+    });
+
+    // Discord API erişim testi
+    console.log('[NETWORK] Discord API bağlantısı test ediliyor...');
+
+    fetch('https://discord.com/api/gateway')
+        .then(async response => {
+            console.log(`[NETWORK] Discord API HTTP: ${response.status}`);
+            console.log('[NETWORK] Discord API yanıtı:', await response.text());
+        })
+        .catch(error => {
+            console.error('[NETWORK ERROR] Discord API erişilemiyor:', error);
+        });
+
+    // Login timeout kontrolü
     const loginWatchdog = setTimeout(() => {
         console.error(
-            '[LOGIN TIMEOUT] 30 saniye geçti ancak Discord login işlemi tamamlanmadı!'
+            '[LOGIN TIMEOUT] 30 saniye geçti ancak Discord login tamamlanmadı!'
         );
-        console.error('[LOGIN TIMEOUT] WebSocket bağlantısı ve Gateway kontrol edilmeli.');
+
+        console.error('[LOGIN TIMEOUT] Gateway bağlantısı kontrol edilmeli.');
     }, 30000);
 
     loginWatchdog.unref();
 
-    // Login
+    // Discord Login
+    console.log('[LOGIN] Discord giriş işlemi başlatılıyor...');
+
     client.login(process.env.TOKEN)
         .then(() => {
             clearTimeout(loginWatchdog);
+
             reconnectAttempts = 0;
+
             console.log('[LOGIN] Discord login işlemi başarılı.');
         })
         .catch(error => {
             clearTimeout(loginWatchdog);
+
             console.error('[LOGIN ERROR]', error);
+
             scheduleReconnect();
         });
+}
 
+// Reconnect
 function scheduleReconnect() {
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        console.error(`[FATAL] Maksimum yeniden bağlanma denemesi (${MAX_RECONNECT_ATTEMPTS}) aşıldı.`);
+        console.error(
+            `[FATAL] Maksimum yeniden bağlanma denemesi (${MAX_RECONNECT_ATTEMPTS}) aşıldı.`
+        );
         return;
     }
 
@@ -237,21 +267,26 @@ function scheduleReconnect() {
         } catch (error) {
             console.error('[DESTROY ERROR]', error);
         }
+
         client = null;
     }
 
     isBotStartingOrRunning = false;
 
     const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
+
     reconnectAttempts++;
 
-    console.log(`[RECONNECT] Deneme ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}, ${delay / 1000} saniye sonra.`);
+    console.log(
+        `[RECONNECT] Deneme ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}, ${delay / 1000} saniye sonra.`
+    );
 
     setTimeout(() => {
         startDiscordBot();
     }, delay);
 }
 
+// Stop Bot
 function stopDiscordBot() {
     if (client) {
         try {
@@ -264,13 +299,19 @@ function stopDiscordBot() {
         isBotStartingOrRunning = false;
         reconnectAttempts = 0;
 
-        console.log('[INFO] Bot kapatıldı.');
+        console.log('[INFO] Bot kapatıldı (Dashboard üzerinden).');
     }
 }
 
+// Bot Statistics
 function getBotStats() {
     if (!client) {
-        return { ping: 0, uptime: 0, servers: 0, users: 0 };
+        return {
+            ping: 0,
+            uptime: 0,
+            servers: 0,
+            users: 0
+        };
     }
 
     return {
@@ -281,17 +322,19 @@ function getBotStats() {
     };
 }
 
-// Error handling
-process.on('unhandledRejection', (reason) => {
-    console.error('[FATAL] Unhandled Rejection:', reason);
+// Process Error Handling
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[FATAL] Unhandled Rejection:', promise, reason);
 });
 
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', error => {
     console.error('[FATAL] Uncaught Exception:', error);
+    console.error('[FATAL] Bot ayakta tutuluyor...');
 });
 
+// Graceful Shutdown
 process.on('SIGTERM', () => {
-    console.log('[INFO] SIGTERM received.');
+    console.log('[INFO] SIGTERM received. Shutting down gracefully...');
 
     if (client) {
         client.destroy();
@@ -306,5 +349,7 @@ import { startDashboard, setBotFunctions } from './dashboard';
 setBotFunctions(startDiscordBot, stopDiscordBot, getBotStats);
 
 startDiscordBot();
+
 startDashboard(startDiscordBot, stopDiscordBot);
+
 startKeepAlive();
