@@ -1,4 +1,3 @@
-
 import { Client, GatewayIntentBits, Collection, Partials } from 'discord.js';
 import { config } from 'dotenv';
 import * as fs from 'fs';
@@ -157,49 +156,74 @@ function startDiscordBot() {
 
     console.log(`[EVENTS] ${eventFiles.length} event dosyası tarandı.`);
 
-    // Discord bağlantı olayları
-    client.on('shardDisconnect', (event) => {
-        console.warn(`[WARN] Shard disconnected. Code: ${event.code}. Reason: ${event.reason}`);
+
+    // Discord bağlantı tanılama
+    console.log('[LOGIN] Discord giriş işlemi başlatılıyor...');
+
+    // Discord API erişim testi
+    fetch('https://discord.com/api/gateway')
+        .then(async response => {
+            console.log(`[NETWORK] Discord API HTTP: ${response.status}`);
+            console.log('[NETWORK] Discord API yanıtı:', await response.text());
+        })
+        .catch(error => {
+            console.error('[NETWORK ERROR] Discord API erişilemiyor:', error);
+        });
+
+    // Gateway olayları
+    client.once('ready', () => {
+        console.log('[GATEWAY] READY olayı başarıyla alındı.');
     });
 
-    client.on('shardError', (error) => {
-        console.error('[ERROR] Shard error:', error);
+    client.on('shardReady', shardId => {
+        console.log(`[GATEWAY] Shard ${shardId} hazır.`);
     });
 
-    client.on('shardReconnecting', (shardId) => {
-        console.log(`[INFO] Shard ${shardId} reconnecting...`);
+    client.on('shardDisconnect', (event, shardId) => {
+        console.error(
+            `[GATEWAY] Shard ${shardId} bağlantısı kesildi.`,
+            'Kod:', event.code,
+            'Sebep:', event.reason
+        );
     });
 
-    client.on('error', (error) => {
-        console.error('[DISCORD CLIENT ERROR]', error);
+    client.on('shardError', error => {
+        console.error('[GATEWAY ERROR]', error);
     });
 
-    client.on('warn', (warning) => {
-        console.warn('[DISCORD WARNING]', warning);
+    client.on('invalidated', () => {
+        console.error('[GATEWAY] Oturum geçersiz hale geldi!');
     });
 
-    client.on('debug', (info) => {
-        if (
-            info.includes('Heartbeat') ||
-            info.includes('WebSocket')
-        ) {
-            console.log('[DISCORD DEBUG]', info);
+    // WebSocket debug
+    client.on('debug', info => {
+        if (/ws|gateway|heartbeat|shard/i.test(info)) {
+            console.log('[GATEWAY DEBUG]', info);
         }
     });
 
-    // Login
-    console.log('[LOGIN] Discord giriş işlemi başlatılıyor...');
+    // 30 saniyelik bağlantı kontrolü
+    const loginWatchdog = setTimeout(() => {
+        console.error(
+            '[LOGIN TIMEOUT] 30 saniye geçti ancak Discord login işlemi tamamlanmadı!'
+        );
+        console.error('[LOGIN TIMEOUT] WebSocket bağlantısı ve Gateway kontrol edilmeli.');
+    }, 30000);
 
+    loginWatchdog.unref();
+
+    // Login
     client.login(process.env.TOKEN)
         .then(() => {
+            clearTimeout(loginWatchdog);
             reconnectAttempts = 0;
             console.log('[LOGIN] Discord login işlemi başarılı.');
         })
         .catch(error => {
+            clearTimeout(loginWatchdog);
             console.error('[LOGIN ERROR]', error);
             scheduleReconnect();
         });
-}
 
 function scheduleReconnect() {
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
